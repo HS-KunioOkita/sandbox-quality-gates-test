@@ -16,4 +16,7 @@ async function bootstrap(): Promise<void> {
   await app.listen(PORT);
 }
 
-void bootstrap();
+bootstrap().catch((cause: unknown) => {
+  console.error('API の起動に失敗しました', cause);
+  process.exit(1);
+});
