@@ -5,11 +5,12 @@ import { OrdersService } from './orders.service';
 interface MockPrisma {
   order: {
     findMany: jest.Mock;
+    create: jest.Mock;
   };
 }
 
 function createMockPrisma(): MockPrisma {
-  return { order: { findMany: jest.fn() } };
+  return { order: { findMany: jest.fn(), create: jest.fn() } };
 }
 
 describe('OrdersService', () => {
@@ -103,6 +104,46 @@ describe('OrdersService', () => {
       prisma.order.findMany.mockResolvedValue([]);
 
       await expect(service.findByUser('user-1')).resolves.toEqual([]);
+    });
+  });
+
+  describe('create', () => {
+    it('作成した注文を割引適用後の合計付きで返す', async () => {
+      prisma.order.create.mockResolvedValue({
+        id: 'order-new',
+        productName: 'マウス',
+        unitPrice: 2000,
+        quantity: 1,
+        status: 'PENDING',
+        user: { isMember: true },
+      });
+
+      const result = await service.create('user-1', {
+        productName: 'マウス',
+        unitPrice: 2000,
+        quantity: 1,
+      });
+
+      // 2000 * 1 = 2000 → 会員なので 1800
+      expect(result.discountedTotal).toBe(1800);
+    });
+
+    it('userId を紐付けて作成し、user を同時に取得する', async () => {
+      prisma.order.create.mockResolvedValue({
+        id: 'order-new',
+        productName: 'マウス',
+        unitPrice: 2000,
+        quantity: 1,
+        status: 'PENDING',
+        user: { isMember: false },
+      });
+
+      await service.create('user-1', { productName: 'マウス', unitPrice: 2000, quantity: 1 });
+
+      expect(prisma.order.create).toHaveBeenCalledWith({
+        data: { userId: 'user-1', productName: 'マウス', unitPrice: 2000, quantity: 1 },
+        include: { user: true },
+      });
     });
   });
 });

@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { applyDiscount } from '../discount/discount';
 import { PrismaService } from '../prisma/prisma.service';
+import type { CreateOrderDto } from './dto/create-order.dto';
 import type { OrderResponseDto } from './dto/order-response.dto';
 
 /** user を include して取得した Order */
@@ -32,5 +33,20 @@ export class OrdersService {
     });
 
     return orders.map(toOrderResponse);
+  }
+
+  /** 注文を作成し、会員割引を適用した合計付きで返す */
+  async create(userId: string, dto: CreateOrderDto): Promise<OrderResponseDto> {
+    const order = await this.prisma.order.create({
+      data: {
+        userId,
+        productName: dto.productName,
+        unitPrice: dto.unitPrice,
+        quantity: dto.quantity,
+      },
+      include: { user: true },
+    });
+
+    return toOrderResponse(order);
   }
 }
