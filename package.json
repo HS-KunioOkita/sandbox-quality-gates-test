@@ -7,11 +7,14 @@
     "build": "turbo build",
     "typecheck": "turbo typecheck",
     "test": "turbo test",
+    "lint": "eslint . --max-warnings=0",
     "db:up": "docker compose up -d --wait",
     "db:down": "docker compose down"
   },
   "devDependencies": {
+    "@repo/eslint-config": "workspace:*",
     "@types/node": "26.1.2",
+    "eslint": "10.8.0",
     "turbo": "2.10.7",
     "typescript": "5.9.3"
   }
