@@ -216,13 +216,22 @@ packages:
 {
   "$schema": "https://turbo.build/schema.json",
   "tasks": {
-    "typecheck": { "dependsOn": ["^build"] },
+    "generate": { "cache": false },
+    "typecheck": { "dependsOn": ["^build", "generate"] },
     "lint": {},
-    "test": { "dependsOn": ["^build"], "outputs": ["coverage/**"] },
-    "build": { "dependsOn": ["^build"], "outputs": ["dist/**"] }
+    "test": { "dependsOn": ["^build", "generate"], "outputs": ["coverage/**"] },
+    "build": { "dependsOn": ["^build", "generate"], "outputs": ["dist/**"] }
   }
 }
 ```
+
+**`generate` タスクは手順書 §1.2 に無い意図的な追加である。** Prisma Client の生成を build / typecheck / test の前提として turbo に管理させるため。理由は Task 7 の検証で判明した以下の事実にある。
+
+`pnpm install` が走らせる `@prisma/client` の postinstall はモノレポルートから実行されるため `apps/api/prisma/schema.prisma` を発見できず、**モデル型を持たないスタブ Client を生成する**。Prisma 自身が `We could not find your Prisma schema in the default locations` と警告する。この状態で `tsc` を回すと `error TS2694: Namespace '...Prisma' has no exported member 'OrderGetPayload'` で落ちる。
+
+`generate` を turbo タスクにしておくと、`turbo build` / `typecheck` / `test` のどれを叩いても先行して実行されるため、人が手順を忘れても壊れない。手順書 §3.3 が CI に課す `--frozen-lockfile --ignore-scripts` でも postinstall に依存しないので同じように機能する。`cache: false` なのは生成先が `node_modules` 配下で turbo のキャッシュ対象にならないため。
+
+> **Phase 6 の検証レポート項目**：設計書の仮説 2 は「`--ignore-scripts` が `prisma generate` を止める」としていたが、実際は **`--ignore-scripts` を付けなくても pnpm workspace では壊れる**。手順書 §3.3 と Prisma の組み合わせは想定より深い手当てが必要。turbo.json への `generate` 追加も手順書 §1.2 からの逸脱として記録する。
 
 - [ ] **Step 4: `.gitignore` を作成**
 
@@ -428,6 +437,7 @@ Expected: `index.js` と `index.d.ts` が生成される。
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "jest",
+    "generate": "prisma generate",
     "start:dev": "ts-node -P tsconfig.build.json src/main.ts",
     "db:migrate": "prisma migrate dev",
     "db:seed": "ts-node -P tsconfig.build.json prisma/seed.ts"
@@ -2039,9 +2049,11 @@ pnpm turbo test --dry-run=text
 ```
 
 Expected:
-- `build` の `Tasks to Run` に `@repo/shared#build` / `api#build` / `web#build` の 3 つだけが並ぶ
-- `test` の `Tasks to Run` に `api#test` / `web#test` の 2 つだけが並ぶ
-- どちらにも `@repo/tsconfig` は現れない
+- `build` の実行対象に `@repo/shared#build` / `api#build` / `web#build` と、`api#generate` が並ぶ（`api` だけが `generate` スクリプトを持つ）
+- `test` の実行対象に `api#test` / `web#test` と `api#generate` が並ぶ
+- どちらにも `@repo/tsconfig` のタスクは現れない
+
+turbo 2.10.7 の `--dry-run=text` は依存グラフを補完するために、スクリプトを持たないパッケージのタスクをプレースホルダとして表示することがある。**判定は「実際に実行されたタスク数」で行う**（Step 3〜5 の実行結果を見る）。表示形式に依存した判定はしない。
 
 - [ ] **Step 2: `packages/shared` に `test` スクリプトが無いことを確認**
 
@@ -2185,5 +2197,7 @@ Phase 0 の実装中に判明し、Phase 1（L1 + 検証ハーネス）で扱う
 | 4 | `apps/api/tsconfig.spec.json` で `noUnusedLocals` を緩めている | ESLint 側の型情報付きルールがどの tsconfig を使うかで挙動が変わる可能性を確認する |
 | 5 | `OrdersController` のデコレータ順が `@Controller` → `@UseGuards` | Phase 2 の仮説 5（Semgrep カスタムルールの偽陽性）の検証対象。Phase 1 では変更しない |
 | 6 | `toOrderResponse` はファイルローカル関数で export していない | Phase 4 で Stryker の `mutate` 対象になる。`orders.service.ts` は `*.module.ts` でもエントリポイントでもないので除外しない |
+| 9 | `turbo.json` に `generate` タスクを追加し build / typecheck / test が依存している | 手順書 §1.2 からの意図的な逸脱。Phase 2 で `--ignore-scripts` 付き install を検証する際、この配線があるおかげで Prisma Client が壊れないことを確認する |
+| 10 | Prisma の postinstall は pnpm workspace でスキーマを発見できない | 仮説 2 の実測結果として Phase 6 レポートに記載。`--ignore-scripts` の有無に関わらず明示的な生成が必要 |
 | 7 | TypeScript は 5.9.3 に固定（最新 7.0.2 は `ts-jest` / `typescript-eslint` が非対応） | Phase 6 の検証レポートに「手順書は TypeScript バージョン制約に触れていない」として記録する |
 | 8 | Prisma は 6.19.3 に固定（7 系は生成物が TS ソースでゲート対象になる） | Phase 6 の検証レポートに追加検証候補として記録する |
