@@ -1361,8 +1361,15 @@ async function bootstrap(): Promise<void> {
   await app.listen(PORT);
 }
 
-void bootstrap();
+bootstrap().catch((cause: unknown) => {
+  console.error('API の起動に失敗しました', cause);
+  process.exit(1);
+});
 ```
+
+`void bootstrap()` にしてはいけない。`void` は `@typescript-eslint/no-floating-promises`（Phase 1 で有効化）を**通過してしまう**ため、L1 では検出できないまま起動エラーを飲み込む。ポート使用中や DB 接続不可のときに何も表示されずサーバが立たない状態になり、Phase 3 の e2e や Phase 5 の nightly で原因切り分けに時間を取られる。
+
+> **Phase 6 の検証レポート項目**：`void` を付けた floating promise は `no-floating-promises` を通過する。手順書 §10 の落とし穴表に無い抜け穴であり、L1 では捕まらない類型として記録する。
 
 - [ ] **Step 11: ビルドと typecheck を確認**
 
