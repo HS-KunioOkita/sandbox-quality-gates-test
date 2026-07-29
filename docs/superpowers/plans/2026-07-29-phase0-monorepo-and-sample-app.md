@@ -1590,8 +1590,23 @@ export default defineConfig({
 - [ ] **Step 6: `apps/web/src/test/setup.ts` を作成**
 
 ```ts
+import { cleanup } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
+import { afterEach } from 'vitest';
+
+// Vitest は globals: false のため RTL の自動 cleanup が働かない。
+// 明示的に登録しないとテスト間で DOM が蓄積し、前のテストが残したノードに
+// 対してアサーションが通ってしまう。
+afterEach(() => {
+  cleanup();
+});
 ```
+
+**`afterEach(cleanup)` の登録は必須である。** React Testing Library は Vitest の `globals: true` を検出したときだけ自動で cleanup を登録する。本プロジェクトは全テストファイルで `describe` / `it` / `expect` を明示 import する方針なので `globals` は false のままにし、代わりに cleanup を明示登録する。
+
+登録を忘れると **テスト間で `document.body` の DOM が蓄積し、後のテストが前のテストの残骸に対してアサーションを通してしまう**。実際に Phase 0 の最終レビューで、`OrderList.test.tsx` の「割引が効いている注文には割引の印を付ける」が自分の render ではなく直前のテストが残したノードに対して合格していたことが再現確認された（`container.contains(found) === false`、アサーション前に 10ms 待つと `Found multiple elements` で失敗）。
+
+> **Phase 4 への影響**：Stryker の Vitest ランナーを `apps/web` に当てる際、自分の render を検証していないテストは mutant を殺せないためミューテーションスコアが信用できなくなる。手順書 §10 が「アサーションの緩いテストは L4 で露見させる」と言う対象を検証基盤側が抱えることになるので、Phase 0 で解消しておく。
 
 - [ ] **Step 7: `apps/web/src/env.d.ts` を作成**
 
