@@ -13,6 +13,9 @@ export function OrderList({ userId }: OrderListProps): JSX.Element {
   useEffect(() => {
     let cancelled = false;
 
+    setOrders(null);
+    setError(null);
+
     fetchOrders(userId)
       .then((fetched) => {
         if (!cancelled) {

@@ -43,6 +43,6 @@ main()
     console.error(error);
     process.exitCode = 1;
   })
-  .finally(() => {
-    void prisma.$disconnect();
+  .finally(async () => {
+    await prisma.$disconnect();
   });

@@ -6,3 +6,4 @@ coverage/
 reports/
 openapi.json
 .superpowers/
+.playwright-mcp/

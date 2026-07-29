@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fetchOrders, type OrderView } from '../../api/client';
 import { OrderList } from './OrderList';
@@ -78,5 +78,23 @@ describe('OrderList', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(
       '注文の取得に失敗しました（HTTP 401）',
     );
+  });
+
+  it('エラー表示後に userId が変わって取得が成功すればエラーから復帰する', async () => {
+    fetchOrdersMock.mockRejectedValueOnce(new Error('注文の取得に失敗しました（HTTP 401）'));
+
+    const { container, rerender } = render(<OrderList userId="user-1" />);
+    const scoped = within(container);
+
+    expect(await scoped.findByRole('alert')).toHaveTextContent(
+      '注文の取得に失敗しました（HTTP 401）',
+    );
+
+    fetchOrdersMock.mockResolvedValueOnce(SAMPLE_ORDERS);
+
+    rerender(<OrderList userId="user-2" />);
+
+    expect(await scoped.findByText('キーボード')).toBeInTheDocument();
+    expect(scoped.queryByRole('alert')).not.toBeInTheDocument();
   });
 });
