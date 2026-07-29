@@ -13,6 +13,7 @@ export function OrderList({ userId }: OrderListProps): JSX.Element {
   useEffect(() => {
     let cancelled = false;
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- userId 変更時に前のユーザーの表示とエラーを残さないためのリセット。呼び出し側に key を要求せずコンポーネント内で自己完結させる
     setOrders(null);
     setError(null);
 
