@@ -226,6 +226,8 @@ packages:
 
 - [ ] **Step 4: `.gitignore` を作成**
 
+既に `.gitignore` が存在する場合は、この内容で上書きする。
+
 ```gitignore
 node_modules/
 dist/
@@ -234,9 +236,10 @@ coverage/
 .env
 reports/
 openapi.json
+.superpowers/
 ```
 
-`reports/` は Stryker の incremental ファイル（手順書 §5.2）、`openapi.json` は Phase 3 の生成物。Phase 0 では未使用だが、後で追記漏れを起こさないよう先に入れる。
+`reports/` は Stryker の incremental ファイル（手順書 §5.2）、`openapi.json` は Phase 3 の生成物。Phase 0 では未使用だが、後で追記漏れを起こさないよう先に入れる。`.superpowers/` は superpowers スキルの作業用スクラッチ領域。
 
 - [ ] **Step 5: `docker-compose.yml` を作成**
 
