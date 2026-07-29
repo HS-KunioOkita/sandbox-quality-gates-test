@@ -6,6 +6,7 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "jest",
+    "generate": "prisma generate",
     "start:dev": "ts-node -P tsconfig.build.json src/main.ts",
     "db:migrate": "prisma migrate dev",
     "db:seed": "ts-node -P tsconfig.build.json prisma/seed.ts"
