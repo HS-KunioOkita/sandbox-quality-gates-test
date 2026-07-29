@@ -241,12 +241,16 @@ export default [
   {
     // 検証ハーネスとゲートスクリプトは bash / 単体 Node スクリプトで、
     // どの tsconfig プロジェクトにも属さない
-    ignores: ['verification/lib/**', 'apps/**', 'docs/**'],
+    ignores: ['verification/lib/**', 'docs/**'],
   },
 ];
 ```
 
-`apps/**` を ignores に入れているのは、`apps/api` と `apps/web` が自分の設定ファイルを持つためである。ESLint 10 の探索はファイル単位なので実際には二重適用されないが、ルート設定の責務を明示するために書く。
+**`apps/**` を ignores に入れてはいけない。** `files` を伴わない単独の `ignores` は ESLint の**グローバル ignore** であり、ディレクトリ走査そのものを止める。`apps/**` を入れると `pnpm eslint .` が `apps/` 配下を 1 件も検査せず、`--max-warnings=0` が通ってしまう — **L1 ゲートが何も守らない状態**になる。実測では走査対象が 3 ファイル（`apps/` 配下 0 件）まで縮んだ。
+
+`apps/api` と `apps/web` は自分の設定ファイルを持つが、それは「ルート設定から除外する」ことでは表現しない。ESLint 10 はファイルごとに設定を探索し、見つかった設定が上位を置き換えるので、除外を書く必要がそもそも無い。
+
+> **Phase 6 の検証レポート項目**：`ignores` を「このディレクトリは別の設定が担当する」という**責務の注記代わりに使ってはいけない**。グローバル ignore は走査を止めるため、ゲートが空振りする。手順書 §2.4 は設定の分割方法を示すだけで、ルート設定側で何を書くべきか / 書いてはいけないかに触れていない。
 
 `verification/lib/**` を除外する理由は、Task 4 で作る `judge.mjs` が型チェック対象の tsconfig を持たないためである。Task 4 でここを見直す。
 
@@ -1044,7 +1048,9 @@ export default [
   ...base,
   {
     // apps/* は自分の設定ファイルを持つ。docs は lint 対象外。
-    ignores: ['apps/**', 'docs/**'],
+    // docs は lint 対象外。apps/** は入れないこと（グローバル ignore は走査を止め、
+    // apps 配下がゲートの対象外になる）。
+    ignores: ['docs/**'],
   },
 ];
 ```
@@ -1676,7 +1682,8 @@ git commit -m "feat: L1 検証ケース 6 本を揃え RESULTS.md を生成"
 | 2 | `expect.yml` の `expect_detection` は読み取りのみ実装、判定は未実装 | `l2-new-deps` が非ブロックゲートなので、ここで判定を実装する |
 | 3 | `verification/run-case.sh` はゲート一覧をハードコードしている | L2 のゲートを足す際、一覧の持ち方（配列 or ディレクトリ走査）を見直す |
 | 4 | `--ignore-scripts` 付き install で Prisma Client が壊れないことを `l2-install.sh` で担保している | 仮説 2 の検証として、`prisma generate` の行を外すと何が起きるかを 1 回確認して記録する |
-| 5 | ルート `eslint.config.mjs` は `apps/**` と `docs/**` を ignores している | `.semgrep/` の YAML は ESLint の対象外なので影響なし |
+| 5 | ルート `eslint.config.mjs` の ignores は `docs/**` のみ | `apps/**` を足してはいけない（グローバル ignore が走査を止めゲートが空振りする）。`.semgrep/` の YAML は ESLint の対象外なので影響なし |
+| 6 | `apps/web` の `OrderList.tsx` に `react-hooks/set-state-in-effect` の抑制コメントがある | 手順書 §2.4 は `exhaustive-deps` にしか言及しないが、`recommended-latest` はより広いルール面を持ち込む。Phase 6 レポート項目として記録済み |
 
 ## Phase 5 への申し送り
 
