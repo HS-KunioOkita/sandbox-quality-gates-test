@@ -833,6 +833,7 @@ git commit -m "feat: Prisma スキーマ・初期マイグレーション・シ�
     - `findByUser(userId: string): Promise<OrderResponseDto[]>`
     - `create(userId: string, dto: CreateOrderDto): Promise<OrderResponseDto>` ※ `CreateOrderDto` は Task 5 で定義するため、本タスクでは `create` は実装しない
   - `OrdersService` のコンストラクタ引数は `(private readonly prisma: PrismaService)`
+  - `orders.service.ts` 内のファイルローカル関数 `toOrderResponse(order: OrderWithUser): OrderResponseDto` と型 `OrderWithUser = Prisma.OrderGetPayload<{ include: { user: true } }>`。**export しない。** Task 5 の `create` が同じファイル内から再利用する
 
 **注記:** `create` は入力 DTO（Task 5）に依存するため Task 5 で追加する。本タスクは `findByUser` のみを実装する。
 
@@ -1017,11 +1018,29 @@ Expected: FAIL。`Cannot find module './orders.service'` というエラーに�
 
 `apps/api/src/orders/orders.service.ts`:
 
+レスポンスへの変換は `toOrderResponse` に切り出す。Task 5 で追加する `create` も同じ変換を使うため、ここで関数として定義しておく。`export` はしない（このファイル内の実装詳細）。
+
 ```ts
 import { Injectable } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import { applyDiscount } from '../discount/discount';
 import { PrismaService } from '../prisma/prisma.service';
 import type { OrderResponseDto } from './dto/order-response.dto';
+
+/** user を include して取得した Order */
+type OrderWithUser = Prisma.OrderGetPayload<{ include: { user: true } }>;
+
+/** 取得した注文をレスポンス形へ変換し、会員割引を適用した合計を載せる */
+function toOrderResponse(order: OrderWithUser): OrderResponseDto {
+  return {
+    id: order.id,
+    productName: order.productName,
+    unitPrice: order.unitPrice,
+    quantity: order.quantity,
+    status: order.status,
+    discountedTotal: applyDiscount(order.unitPrice * order.quantity, order.user.isMember),
+  };
+}
 
 @Injectable()
 export class OrdersService {
@@ -1035,14 +1054,7 @@ export class OrdersService {
       orderBy: { createdAt: 'desc' },
     });
 
-    return orders.map((order) => ({
-      id: order.id,
-      productName: order.productName,
-      unitPrice: order.unitPrice,
-      quantity: order.quantity,
-      status: order.status,
-      discountedTotal: applyDiscount(order.unitPrice * order.quantity, order.user.isMember),
-    }));
+    return orders.map(toOrderResponse);
   }
 }
 ```
@@ -1085,7 +1097,7 @@ git commit -m "feat: PrismaService と OrdersService.findByUser を追加"
 - Create: `apps/api/src/main.ts`
 
 **Interfaces:**
-- Consumes: `OrdersService.findByUser`（Task 4）、`PrismaModule` / `PrismaService`（Task 4）、`OrderResponseDto`（Task 4）
+- Consumes: `OrdersService.findByUser`（Task 4）、`PrismaModule` / `PrismaService`（Task 4）、`OrderResponseDto`（Task 4）、`orders.service.ts` 内のファイルローカル関数 `toOrderResponse`（Task 4）
 - Produces:
   - `interface AuthenticatedRequest extends Request { userId: string }`（`auth.guard.ts` から export）
   - `AuthGuard implements CanActivate`（`canActivate(context: ExecutionContext): boolean`）
@@ -1236,7 +1248,7 @@ import 節に追加:
 import type { CreateOrderDto } from './dto/create-order.dto';
 ```
 
-`findByUser` の後ろに追加:
+`findByUser` の後ろに追加する。レスポンスへの変換は Task 4 で定義した `toOrderResponse` を再利用する（重複させない）。
 
 ```ts
   /** 注文を作成し、会員割引を適用した合計付きで返す */
@@ -1251,18 +1263,9 @@ import type { CreateOrderDto } from './dto/create-order.dto';
       include: { user: true },
     });
 
-    return {
-      id: order.id,
-      productName: order.productName,
-      unitPrice: order.unitPrice,
-      quantity: order.quantity,
-      status: order.status,
-      discountedTotal: applyDiscount(order.unitPrice * order.quantity, order.user.isMember),
-    };
+    return toOrderResponse(order);
   }
 ```
-
-`findByUser` と `create` でレスポンス組み立てが重複しているが、**Phase 0 ではあえて重複させたままにする。** 手順書 §10 の「設計の一貫性が崩れ、重複が増える」は L5 で拾う想定の落とし穴であり、この重複が Phase 5 の AI レビューで指摘されるかどうか自体が検証材料になる。
 
 - [ ] **Step 6: テストが通ることを確認**
 
@@ -2011,8 +2014,7 @@ git commit -m "feat: React/Vite の注文一覧画面を追加"
 ## Task 7: turbo タスク配線と Phase 0 完了確認
 
 **Files:**
-- Modify: `packages/shared/package.json`（`test` スクリプトを追加）
-- Create: `README.md` の開発手順セクション（既存 `README.md` を Modify）
+- Modify: `README.md`（開発手順を追記）
 
 **Interfaces:**
 - Consumes: Task 1〜6 のすべて
@@ -2020,29 +2022,27 @@ git commit -m "feat: React/Vite の注文一覧画面を追加"
   - `pnpm turbo build` / `pnpm turbo typecheck` / `pnpm turbo test` がリポジトリ全体で通る状態
   - `README.md` に起動手順が記載された状態
 
-- [ ] **Step 1: `packages/shared` に `test` スクリプトを追加**
+- [ ] **Step 1: turbo が対象パッケージを正しく絞れていることを確認**
 
-`turbo test` は全パッケージの `test` を探す。`packages/shared` は定数と型だけでテスト対象が無いため、`turbo` が失敗しないように何もしない `test` を置く。
-
-`packages/shared/package.json` の `scripts` を次に置き換える:
-
-```json
-  "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "echo 'テスト対象なし（定数と型のみ）'"
-  },
-```
-
-- [ ] **Step 2: `packages/tsconfig` に turbo タスクが無いことを確認**
-
-`packages/tsconfig/package.json` には `scripts` が無い。turbo はスクリプトが無いパッケージを黙ってスキップするので追加は不要。
+turbo はそのタスクのスクリプトを持たないパッケージを黙ってスキップする。したがって `packages/shared`（テスト対象が無い）と `packages/tsconfig`（スクリプトを一切持たない）に、何もしない `test` スクリプトを置く必要はない。
 
 ```bash
 pnpm turbo build --dry-run=text
+pnpm turbo test --dry-run=text
 ```
 
-Expected: 出力の `Tasks to Run` に `@repo/shared#build` / `api#build` / `web#build` の 3 つだけが並び、`@repo/tsconfig` は現れない。
+Expected:
+- `build` の `Tasks to Run` に `@repo/shared#build` / `api#build` / `web#build` の 3 つだけが並ぶ
+- `test` の `Tasks to Run` に `api#test` / `web#test` の 2 つだけが並ぶ
+- どちらにも `@repo/tsconfig` は現れない
+
+- [ ] **Step 2: `packages/shared` に `test` スクリプトが無いことを確認**
+
+```bash
+node -e "const p=require('./packages/shared/package.json'); if ('test' in p.scripts) { console.error('test スクリプトは不要'); process.exit(1); } console.log('OK');"
+```
+
+Expected: `OK`。
 
 - [ ] **Step 3: turbo でビルドが通ることを確認**
 
@@ -2066,7 +2066,7 @@ Expected: 3 パッケージすべて成功、エラーなし。
 pnpm turbo test
 ```
 
-Expected: `api` 13 件・`web` 9 件が成功、`@repo/shared` はメッセージのみ。
+Expected: `api` 13 件・`web` 9 件が成功。`@repo/shared` と `@repo/tsconfig` はスキップされる。
 
 - [ ] **Step 6: キャッシュが効くことを確認**
 
@@ -2148,8 +2148,8 @@ Expected: すべて成功。失敗した場合は `README.md` の手順に不足
 - [ ] **Step 9: コミット**
 
 ```bash
-git add README.md packages/shared/package.json
-git commit -m "docs: 開発手順を README に追加し turbo タスクを配線"
+git add README.md
+git commit -m "docs: 開発手順を README に追加"
 ```
 
 ---
@@ -2177,6 +2177,6 @@ Phase 0 の実装中に判明し、Phase 1（L1 + 検証ハーネス）で扱う
 | 3 | `apps/web/tsconfig.node.json` を分けてある | ESLint の `projectService: true` が `vite.config.ts` / `vitest.config.ts` を解決できるかを確認する |
 | 4 | `apps/api/tsconfig.spec.json` で `noUnusedLocals` を緩めている | ESLint 側の型情報付きルールがどの tsconfig を使うかで挙動が変わる可能性を確認する |
 | 5 | `OrdersController` のデコレータ順が `@Controller` → `@UseGuards` | Phase 2 の仮説 5（Semgrep カスタムルールの偽陽性）の検証対象。Phase 1 では変更しない |
-| 6 | `OrdersService.findByUser` と `create` でレスポンス組み立てが重複している | 意図的な重複。Phase 5 の `L5-01-duplicate-logic` および AI レビューの検証材料なので解消しない |
+| 6 | `toOrderResponse` はファイルローカル関数で export していない | Phase 4 で Stryker の `mutate` 対象になる。`orders.service.ts` は `*.module.ts` でもエントリポイントでもないので除外しない |
 | 7 | TypeScript は 5.9.3 に固定（最新 7.0.2 は `ts-jest` / `typescript-eslint` が非対応） | Phase 6 の検証レポートに「手順書は TypeScript バージョン制約に触れていない」として記録する |
 | 8 | Prisma は 6.19.3 に固定（7 系は生成物が TS ソースでゲート対象になる） | Phase 6 の検証レポートに追加検証候補として記録する |
