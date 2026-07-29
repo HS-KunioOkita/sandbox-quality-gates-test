@@ -711,6 +711,22 @@ git commit -m "feat: ゲートスクリプトと exit code 正規化を追加"
   - `judge.mjs` の CLI: `node verification/lib/judge.mjs <expect.yml のパス> <actual.tsv のパス>` → 判定結果を JSON で標準出力
   - `expect.yml` の形式（後述のとおり厳密に限定する）
   - `actual.tsv` の形式: 1 行 1 ゲート、`<ゲート名>\t<正規化 exit code>\t<出力の 1 行要約>`
+  - `judge()` の戻り値: `{ claimVerdict, configVerdict, errored, blockedBy, blockingLayers, mismatches }`
+
+### 判定は 2 系統ある（重要）
+
+設計書 §8.4 は「単に『ゲートが赤くなった』ではなく **『主張どおりの層が捕まえたか』を判定する**」と規定している。これを満たすため `judge()` は独立した 2 つの判定を返す。
+
+| 判定 | 何を比べるか | 何のためか |
+|---|---|---|
+| `claimVerdict` | `claimed_layer`（手順書の主張）と、実際に止めたゲートが属する層 | **検証の本題。** `RESULTS.md` の判定列に出る |
+| `configVerdict` | `expect` の各ゲートの pass/fail と実測 | 自分のゲート設定の回帰検出。将来 Phase で設定が壊れたら気づける |
+
+`claimVerdict` の値は `match`（主張どおりの層が止めた）/ `mismatch`（別の層が止めた）/ `not-caught`（どのゲートも止めなかった）/ `inconclusive`（error があった）。
+
+層はゲート名の接頭辞から導く（`l1-lint` → `L1`、`l2-install` → `L2`）。
+
+**`expect` は実測に合わせて更新してよいが、`claimed_layer` は絶対に変えてはいけない。** `expect` は「自分のゲートがどう振る舞うか」のスナップショットであり、初回は実測で確定させるのが正しい。`claimed_layer` は手順書 §10 の主張そのもので、これが検証対象である。ここを実測に合わせて書き換えると判定が恒真になり、ハーネスが何も検証しなくなる。
 
 ### `expect.yml` の形式
 
@@ -792,46 +808,66 @@ test('parseActual は TSV を読める', () => {
   });
 });
 
-test('judge は期待どおりなら一致と判定する', () => {
+test('judge は主張どおりの層が止めたとき claimVerdict を match とする', () => {
   const result = judge(
     { id: 'X', pitfall: 'p', claimedLayer: 'L1', expect: { 'l1-lint': 'fail', 'l1-typecheck': 'pass' } },
     { 'l1-lint': { code: 1, summary: '' }, 'l1-typecheck': { code: 0, summary: '' } },
   );
-  assert.equal(result.verdict, 'match');
+  assert.equal(result.claimVerdict, 'match');
+  assert.equal(result.configVerdict, 'match');
   assert.deepEqual(result.blockedBy, ['l1-lint']);
-  assert.deepEqual(result.mismatches, []);
+  assert.deepEqual(result.blockingLayers, ['L1']);
 });
 
-test('judge は止まるべきゲートが緑なら不一致と判定する', () => {
+test('judge は主張と別の層が止めたとき claimVerdict を mismatch とする', () => {
+  // 手順書は L2（OSV-Scanner）が止めると主張しているが、実際に止めたのは install だけ
+  const result = judge(
+    { id: 'X', pitfall: 'p', claimedLayer: 'L4', expect: { 'l2-install': 'fail' } },
+    { 'l2-install': { code: 1, summary: '' } },
+  );
+  assert.equal(result.claimVerdict, 'mismatch');
+  assert.deepEqual(result.blockingLayers, ['L2']);
+});
+
+test('judge はどのゲートも止めなかったとき claimVerdict を not-caught とする', () => {
+  const result = judge(
+    { id: 'X', pitfall: 'p', claimedLayer: 'L1', expect: { 'l1-lint': 'pass' } },
+    { 'l1-lint': { code: 0, summary: '' } },
+  );
+  assert.equal(result.claimVerdict, 'not-caught');
+  assert.deepEqual(result.blockedBy, []);
+});
+
+test('judge は expect と実測がずれたとき configVerdict を mismatch とする', () => {
   const result = judge(
     { id: 'X', pitfall: 'p', claimedLayer: 'L1', expect: { 'l1-lint': 'fail' } },
     { 'l1-lint': { code: 0, summary: '' } },
   );
-  assert.equal(result.verdict, 'mismatch');
+  assert.equal(result.configVerdict, 'mismatch');
   assert.deepEqual(result.mismatches, [{ gate: 'l1-lint', expected: 'fail', actual: 'pass' }]);
 });
 
-test('judge は error(2) を含むケースを判定不能とする', () => {
+test('judge は error(2) を含むケースを両方 inconclusive とする', () => {
   const result = judge(
     { id: 'X', pitfall: 'p', claimedLayer: 'L1', expect: { 'l1-lint': 'fail' } },
     { 'l1-lint': { code: 2, summary: 'docker が起動していない' } },
   );
-  assert.equal(result.verdict, 'inconclusive');
+  assert.equal(result.claimVerdict, 'inconclusive');
+  assert.equal(result.configVerdict, 'inconclusive');
   assert.deepEqual(result.errored, ['l1-lint']);
 });
 
-test('judge は期待に無いゲートが fail した場合も不一致とする', () => {
+test('judge は複数の層が止めた場合、主張の層が含まれていれば match とする', () => {
   const result = judge(
-    { id: 'X', pitfall: 'p', claimedLayer: 'L1', expect: { 'l1-lint': 'fail', 'l1-typecheck': 'pass' } },
-    { 'l1-lint': { code: 1, summary: '' }, 'l1-typecheck': { code: 1, summary: '' } },
+    { id: 'X', pitfall: 'p', claimedLayer: 'L1', expect: { 'l1-typecheck': 'fail', 'l1-lint': 'fail' } },
+    { 'l1-typecheck': { code: 1, summary: '' }, 'l1-lint': { code: 1, summary: '' } },
   );
-  assert.equal(result.verdict, 'mismatch');
-  assert.deepEqual(result.mismatches, [{ gate: 'l1-typecheck', expected: 'pass', actual: 'fail' }]);
-  assert.deepEqual(result.blockedBy, ['l1-lint', 'l1-typecheck']);
+  assert.equal(result.claimVerdict, 'match');
+  assert.deepEqual(result.blockingLayers, ['L1']);
 });
 ```
 
-`verdict` を 3 値（`match` / `mismatch` / `inconclusive`）にしているのは、設計書 §6.1 の exit code 正規化と対応させるためである。**`error(2)` が 1 つでもあれば緑赤の推論をしない。**
+**`error(2)` が 1 つでもあれば両方の判定を `inconclusive` にし、緑赤の推論をしない。** 設計書 §6.1 の exit code 正規化と対応させる。ツールが実行できなかっただけの状態を「欠陥を検出した」と読み違えないためである。
 
 - [ ] **Step 2: テストが失敗することを確認**
 
@@ -906,10 +942,18 @@ export function parseActual(path) {
   return actual;
 }
 
+/** ゲート名から層を導く（'l1-lint' → 'L1'） */
+function layerOfGate(gate) {
+  return gate.slice(0, 2).toUpperCase();
+}
+
 /**
- * 期待と実測を突き合わせる。
+ * 期待と実測を突き合わせ、独立した 2 つの判定を返す。
  *
- * error(2) が 1 つでもあれば inconclusive とし、緑赤の推論をしない。
+ *   claimVerdict  手順書の主張（claimed_layer）どおりの層が止めたか。検証の本題。
+ *   configVerdict expect の各ゲートの pass/fail が実測と一致するか。設定の回帰検出。
+ *
+ * error(2) が 1 つでもあれば両方 inconclusive とし、緑赤の推論をしない。
  * ツールが実行できなかっただけの状態を「欠陥を検出した」と読み違えないため。
  */
 export function judge(expected, actual) {
@@ -921,8 +965,17 @@ export function judge(expected, actual) {
     .filter(([, r]) => r.code === CODE_FAIL)
     .map(([gate]) => gate);
 
+  const blockingLayers = [...new Set(blockedBy.map(layerOfGate))];
+
   if (errored.length > 0) {
-    return { verdict: 'inconclusive', errored, blockedBy, mismatches: [] };
+    return {
+      claimVerdict: 'inconclusive',
+      configVerdict: 'inconclusive',
+      errored,
+      blockedBy,
+      blockingLayers,
+      mismatches: [],
+    };
   }
 
   const mismatches = [];
@@ -938,10 +991,21 @@ export function judge(expected, actual) {
     }
   }
 
+  let claimVerdict;
+  if (blockedBy.length === 0) {
+    claimVerdict = 'not-caught';
+  } else if (blockingLayers.includes(expected.claimedLayer)) {
+    claimVerdict = 'match';
+  } else {
+    claimVerdict = 'mismatch';
+  }
+
   return {
-    verdict: mismatches.length === 0 ? 'match' : 'mismatch',
+    claimVerdict,
+    configVerdict: mismatches.length === 0 ? 'match' : 'mismatch',
     errored,
     blockedBy,
+    blockingLayers,
     mismatches,
   };
 }
@@ -965,7 +1029,7 @@ if (process.argv[1]?.endsWith('judge.mjs') === true) {
 node --test verification/lib/judge.test.mjs
 ```
 
-Expected: PASS。7 件すべて成功。
+Expected: PASS。9 件すべて成功。
 
 - [ ] **Step 5: `judge.mjs` を lint 対象に入れる**
 
@@ -1121,10 +1185,16 @@ for case_dir in verification/cases/*/; do
   fi
   node -e '
     const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
-    const mark = { match: "✅ 一致", mismatch: "❌ 不一致", inconclusive: "⚠️ 判定不能" }[r.verdict];
-    const blocked = r.blockedBy.length > 0 ? r.blockedBy.join(", ") : "（どのゲートも止めず）";
-    const note = r.mismatches.length > 0
-      ? " " + r.mismatches.map(m => `${m.gate}: 期待 ${m.expected} → 実測 ${m.actual}`).join(" / ")
+    const mark = {
+      match: "✅ 一致",
+      mismatch: "❌ 別の層が止めた",
+      "not-caught": "❌ どの層も止めなかった",
+      inconclusive: "⚠️ 判定不能",
+    }[r.claimVerdict];
+    const blocked = r.blockedBy.length > 0 ? r.blockedBy.join(", ") : "（なし）";
+    // 設定の回帰（expect と実測のずれ）は本題ではないので注記として添える
+    const note = r.configVerdict === "mismatch"
+      ? " ※設定ずれ: " + r.mismatches.map(m => `${m.gate} 期待 ${m.expected} → 実測 ${m.actual}`).join(" / ")
       : "";
     process.stdout.write(`| ${r.expected.id} | ${r.expected.pitfall} | ${r.expected.claimedLayer} | ${blocked} | ${mark}${note} |\n`);
   ' "$WORK/$case_id.json" >>"$WORK/rows.md"
@@ -1168,7 +1238,7 @@ node --test verification/lib/judge.test.mjs 2>&1 | tail -3
 ./scripts/gates/gates.test.sh | tail -2
 ```
 
-Expected: `LINT=0`、judge のテスト 7 件成功、ゲートのテスト 6 件成功。
+Expected: `LINT=0`、judge のテスト 9 件成功、ゲートのテスト 6 件成功。
 
 - [ ] **Step 12: コミット**
 
@@ -1188,7 +1258,7 @@ git commit -m "feat: 検証ハーネス（run-case / run-all / judge）を追加
 
 **Interfaces:**
 - Consumes: `verification/run-case.sh`（Task 4）、`expect.yml` の限定形式（Task 4）、ゲートの exit code 契約（Task 3）
-- Produces: 3 ケースが `run-case.sh` で `verdict: "match"` を返す状態
+- Produces: 3 ケースが `run-case.sh` で `claimVerdict: "match"` を返す状態
 
 この 3 本を先に作るのは、**ハーネスが「lint で止まる」「typecheck で止まる」の 2 系統を正しく判定できることを実証する**ためである。`L1-02` と `L1-01` は lint 系、`L1-05` は typecheck 系。
 
@@ -1250,9 +1320,9 @@ expect:
 ./verification/run-case.sh L1-02-explicit-any
 ```
 
-Expected: JSON が出力され、`"verdict":"match"` と `"blockedBy":["l1-lint"]` を含む。
+Expected: JSON が出力され、`"claimVerdict":"match"` と `"blockedBy":["l1-lint"]` を含む。
 
-`"verdict":"mismatch"` になった場合、`mismatches` の内容を読んで原因を切り分ける。`l1-typecheck` が fail していたら `as any` が型エラーを起こしているので、パッチの当て方を見直す。`l1-lint` が pass していたら `no-explicit-any` が効いていないので Task 2 の設定を見直す。
+`"claimVerdict":"mismatch"` になった場合、`mismatches` の内容を読んで原因を切り分ける。`l1-typecheck` が fail していたら `as any` が型エラーを起こしているので、パッチの当て方を見直す。`l1-lint` が pass していたら `no-explicit-any` が効いていないので Task 2 の設定を見直す。
 
 - [ ] **Step 4: 実行後に作業ツリーとブランチが元に戻っていることを確認**
 
@@ -1299,7 +1369,9 @@ expect:
   l1-lint: fail
 ```
 
-**`l1-lint: fail` にしているのは、型情報付きルールが有効なため lint 側も型エラーを拾う可能性があるからである。** 実行してどちらが止めたかを確認し、実測が `pass` だったら `expect.yml` を実測に合わせて修正する。**期待値を実測に合わせて直すのはこのケースでは正当である** — 「どの層が止めるか」を確定させるのが目的であり、`RESULTS.md` に残る「実際に止めた層」が成果物だからである。修正した場合は理由をコミットメッセージに書く。
+**`l1-lint: fail` にしているのは、型情報付きルールが有効なため lint 側も型エラーを拾う可能性があるからである。** 実行してどちらが止めたかを確認し、実測とずれていたら `expect` の値を実測に合わせて更新する。
+
+**`expect` を実測に合わせるのは正当だが、`claimed_layer` を実測に合わせてはいけない。** `expect`（各ゲートの pass/fail）は「自分のゲートがどう振る舞うか」のスナップショットであり、初回実行で確定させるのが正しい使い方である。一方 `claimed_layer` は手順書 §10 の主張そのもので、これが検証対象である。ここを書き換えると `claimVerdict` が恒真になり、ハーネスが何も検証しなくなる。
 
 - [ ] **Step 7: ケースを実行して判定を確認**
 
@@ -1307,7 +1379,7 @@ expect:
 ./verification/run-case.sh L1-05-unchecked-index
 ```
 
-Expected: `"verdict":"match"`。`mismatch` なら Step 6 の方針に従って `expect.yml` を実測に合わせ、再実行して `match` にする。
+Expected: `"claimVerdict":"match"`。`configVerdict` が `mismatch` なら `expect` を実測に合わせて更新し、再実行する。`claimVerdict` が `mismatch` / `not-caught` の場合は **`claimed_layer` を変えてはいけない** — それは手順書の主張であり検証対象である。その結果をそのまま `RESULTS.md` に残す。
 
 - [ ] **Step 8: `L1-01-eslint-disable-abuse` のパッチを作る**
 
@@ -1347,7 +1419,7 @@ expect:
 ./verification/run-case.sh L1-01-eslint-disable-abuse
 ```
 
-Expected: `"verdict":"match"`、`"blockedBy":["l1-lint"]`。
+Expected: `"claimVerdict":"match"`、`"blockedBy":["l1-lint"]`。
 
 `l1-lint` が pass した場合は `no-unlimited-disable` が効いていない。`/* eslint-disable */` がファイル先頭にあると ESLint 自身のルールも無効化されるため、`no-unlimited-disable` が自分を無効化されてしまう可能性がある。その場合は**それ自体が重要な発見**なので、パッチを変えずに報告する（手順書 §2.4 の抑制コメント対策が自己無効化に対して無力であることを意味する）。
 
@@ -1355,13 +1427,13 @@ Expected: `"verdict":"match"`、`"blockedBy":["l1-lint"]`。
 
 ```bash
 for c in L1-01-eslint-disable-abuse L1-02-explicit-any L1-05-unchecked-index; do
-  ./verification/run-case.sh "$c" | node -e 'const r=JSON.parse(require("fs").readFileSync(0,"utf8")); console.log(r.expected.id, r.verdict, r.blockedBy.join(","))'
+  ./verification/run-case.sh "$c" | node -e 'const r=JSON.parse(require("fs").readFileSync(0,"utf8")); console.log(r.expected.id, r.claimVerdict, r.configVerdict, r.blockedBy.join(","))'
 done
 git status --porcelain; echo "(空なら OK)"
 git branch --list 'verify/*'; echo "(空なら OK)"
 ```
 
-Expected: 3 行とも `match` が出て、作業ツリーとブランチが元に戻っている。
+Expected: 3 行とも `claimVerdict` と `configVerdict` の両方が `match` で、作業ツリーとブランチが元に戻っている。
 
 - [ ] **Step 12: コミット**
 
@@ -1424,7 +1496,7 @@ expect:
 ./verification/run-case.sh L1-03-floating-promise
 ```
 
-Expected: `"verdict":"match"`。`mismatch` なら実測に合わせて `expect.yml` を直し、理由をコミットメッセージに書く。
+Expected: `"claimVerdict":"match"`。`configVerdict` が `mismatch` なら `expect` を実測に合わせて更新し、理由をコミットメッセージに書く。`claimVerdict` の `mismatch` / `not-caught` は手順書とのズレそのものなので、**修正せず結果として記録する**。
 
 - [ ] **Step 4: `L1-04-unused-disable` のパッチを作る**
 
@@ -1467,7 +1539,7 @@ expect:
 ./verification/run-case.sh L1-04-unused-disable
 ```
 
-Expected: `"verdict":"match"`、`"blockedBy":["l1-lint"]`。
+Expected: `"claimVerdict":"match"`、`"blockedBy":["l1-lint"]`。
 
 これは Global Constraints で述べた仮説 7 の実地確認でもある。**`no-unused-disable` を入れていない構成でも `linterOptions` だけで検出できる**ことを、このケースが示す。
 
@@ -1522,7 +1594,7 @@ expect:
 ./verification/run-case.sh L1-06-web-imports-api
 ```
 
-Expected: `"verdict":"match"`。`mismatch` なら実測に合わせて `expect.yml` を直す。
+Expected: `"claimVerdict":"match"`。`configVerdict` が `mismatch` なら `expect` を実測に合わせて更新する。`claimVerdict` の `mismatch` / `not-caught` は修正せず結果として記録する。
 
 - [ ] **Step 10: 全件実行して `RESULTS.md` を生成**
 
@@ -1591,7 +1663,7 @@ git commit -m "feat: L1 検証ケース 6 本を揃え RESULTS.md を生成"
 - [ ] `pnpm turbo typecheck` が成功（L1 typecheck が緑）
 - [ ] `pnpm turbo build typecheck test` が 9 タスク・23 テスト成功（既存機能を壊していない）
 - [ ] `./scripts/gates/gates.test.sh` が 6 件成功（exit code 契約が守られている）
-- [ ] `node --test verification/lib/judge.test.mjs` が 7 件成功（判定ロジックが正しい）
+- [ ] `node --test verification/lib/judge.test.mjs` が 9 件成功（判定ロジックが正しい）
 - [ ] `verification/RESULTS.md` に L1 系 6 ケースの判定が入っている
 - [ ] `./verification/run-all.sh` の実行後、作業ツリーがクリーンで `verify/*` ブランチが残っていない
 - [ ] 仮説 6・7 に結論が出て `docs/superpowers/phase0-findings.md` に記録されている
