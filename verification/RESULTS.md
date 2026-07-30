@@ -24,7 +24,7 @@
 |---|---|---|---|---|
 | L1-01-eslint-disable-abuse | eslint-disable でファイル全体を黙らせる | L1 | l1-lint | ✅ 一致 |
 | L1-02-explicit-any | any で型チェックを回避する | L1 | l1-lint | ✅ 一致 |
-| L1-03-floating-promise | await 忘れで Promise を放置する | L1 | l1-typecheck, l1-lint | ✅ 一致 |
+| L1-03-floating-promise | await 忘れで Promise を放置する | L1 | l1-lint | ✅ 一致 |
 | L1-04-unused-disable | 効いていない eslint-disable を残す | L1 | l1-lint | ✅ 一致 |
 | L1-05-unchecked-index | 配列添字アクセスの undefined を考慮しない | L1 | l1-typecheck | ✅ 一致 |
 | L1-06-web-imports-api | Web から API の内部実装を直接 import する | L1 | （なし） | ❌ どの層も止めなかった |
