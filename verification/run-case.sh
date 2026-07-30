@@ -17,7 +17,15 @@
 # RESULTS.md を書くとブランチ削除で消える。
 set -uo pipefail
 
-cd "$(git rev-parse --show-toplevel)"
+# git rev-parse --show-toplevel が失敗すると空文字列になり、cd "" も失敗する。
+# -e を付けていないためスクリプトはそのまま続行し、以降の git checkout -b /
+# git commit / git apply が無関係なディレクトリで走る事故になりうる（SC2164）。
+# ここで exit 2（error）にする。これは「ハーネスが実行できなかった」状態であり、
+# ゲートの pass/fail の判定に使ってはいけないため 0/1 ではなく 2 にする。
+cd "$(git rev-parse --show-toplevel)" || exit 2
+
+# shellcheck source=scripts/gates/gates.list.sh
+source scripts/gates/gates.list.sh
 
 CASE_ID="${1:-}"
 if [ -z "$CASE_ID" ]; then
@@ -86,6 +94,9 @@ fi
 
 # ゲートを実行する。l2-install は必ず先。依存が無ければ他が動かないため、
 # また install 失敗による連鎖失敗を「ゲートが欠陥を検出した」と誤記録しないため。
+#
+# TSV は 4 列: <ゲート名> <exit code> <detected> <summary>
+# summary はタブを含みうるので必ず最後に置く。
 run_gate() {
   local gate="$1"
   local log="$LOGS/$gate.log"
@@ -93,15 +104,38 @@ run_gate() {
   local code=$?
   local summary
   summary=$(tail -n 1 "$log" | tr -d '\t' | cut -c1-120)
-  printf '%s\t%s\t%s\n' "$gate" "$code" "$summary" >>"$ACTUAL"
+  printf '%s\t%s\t-\t%s\n' "$gate" "$code" "$summary" >>"$ACTUAL"
   return "$code"
 }
 
-if ! run_gate l2-install; then
-  printf 'l2-install が pass しなかったため後続ゲートを打ち切りました\n' >&2
+# 非ブロックゲートを実行する。exit code ではなく出力の marker で判定する
+# （設計書 §8.1）。exit 2 は「実行できなかった」なので detected を決めない。
+run_detection_gate() {
+  local gate="$1"
+  local log="$LOGS/$gate.log"
+  "./scripts/gates/$gate.sh" >"$log" 2>&1
+  local code=$?
+  local detected=false
+  if grep -q 'NEW_DEPENDENCY_DETECTED' "$log"; then
+    detected=true
+  fi
+  local summary
+  summary=$(tail -n 1 "$log" | tr -d '\t' | cut -c1-120)
+  printf '%s\t%s\t%s\t%s\n' "$gate" "$code" "$detected" "$summary" >>"$ACTUAL"
+}
+
+# 非ブロックゲートは元ブランチとの差分を見るので、比較対象を渡す。
+export GATE_BASE_REF="$BASE_BRANCH"
+
+if ! run_gate "${GATE_ORDER[0]}"; then
+  printf '%s が pass しなかったため後続ゲートを打ち切りました\n' "${GATE_ORDER[0]}" >&2
 else
-  run_gate l1-typecheck || true
-  run_gate l1-lint || true
+  for gate in "${GATE_ORDER[@]:1}"; do
+    run_gate "$gate" || true
+  done
+  for gate in "${GATE_DETECTION[@]}"; do
+    run_detection_gate "$gate"
+  done
 fi
 
 cleanup
@@ -118,6 +152,20 @@ if [ "$(git rev-parse --abbrev-ref HEAD)" != "$BASE_BRANCH" ] \
   git status --short >&2
   exit 2
 fi
+
+# node_modules を元ブランチの状態に戻す。
+#
+# ゲートは検証ブランチの package.json / pnpm-lock.yaml で pnpm install を走らせるので、
+# node_modules は検証ブランチの状態のまま元ブランチへ持ち越される。L2-01 と L2-04 は
+# 依存を触るため、戻さないと次のケースが汚染された node_modules の上で走る。
+# run-all.sh の対照実行は先頭で 1 回しか取らないのでこれを検出できない（申し送り #17）。
+if ! pnpm install --frozen-lockfile --ignore-scripts >"$LOGS/restore.log" 2>&1; then
+  printf 'エラー: node_modules を %s の状態へ戻せませんでした\n' "$BASE_BRANCH" >&2
+  printf '  復旧: pnpm install --frozen-lockfile\n' >&2
+  tail -n 20 "$LOGS/restore.log" >&2
+  exit 2
+fi
+
 trap - EXIT
 
 node verification/lib/judge.mjs "$CASE_DIR/expect.yml" "$ACTUAL"

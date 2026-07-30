@@ -2,7 +2,15 @@
 # 全検証ケースを実行し verification/RESULTS.md を生成する。
 set -uo pipefail
 
-cd "$(git rev-parse --show-toplevel)"
+# git rev-parse --show-toplevel が失敗すると空文字列になり、cd "" も失敗する。
+# -e を付けていないためスクリプトはそのまま続行し、以降の処理が無関係な
+# ディレクトリで走る事故になりうる（SC2164）。ここで exit 2（error）にする。
+# これは「ハーネスが実行できなかった」状態であり、ゲートの pass/fail の
+# 判定に使ってはいけないため 0/1 ではなく 2 にする。
+cd "$(git rev-parse --show-toplevel)" || exit 2
+
+# shellcheck source=scripts/gates/gates.list.sh
+source scripts/gates/gates.list.sh
 
 RESULTS=verification/RESULTS.md
 WORK=$(mktemp -d)
@@ -14,7 +22,7 @@ WORK=$(mktemp -d)
 # 全ケースが blockedBy: [l1-lint] で match を返す。ケースの判定は、この対照が
 # 取れていることの上でしか意味を持たない。
 printf '=== baseline（パッチ無し） ===\n' >&2
-for gate in l2-install l1-typecheck l1-lint; do
+for gate in "${GATE_ORDER[@]}"; do
   "./scripts/gates/$gate.sh" >"$WORK/baseline-$gate.log" 2>&1
   baseline_code=$?
   if [ "$baseline_code" -ne 0 ]; then
@@ -29,6 +37,9 @@ done
 
 {
   printf '# 検証結果マトリクス\n\n'
+  # シングルクォート内のバッククォートは Markdown のコードスパン表記であり、
+  # シェル展開させない意図なので SC2016 は偽陽性（1 行ごとにしか黙らないため個別に付ける）
+  # shellcheck disable=SC2016
   printf '`verification/run-all.sh` が生成する。手で編集しない。\n\n'
   printf '「手順書の主張」と「実際に止めた層」を並べるのがこの表の眼目である。\n'
   printf '一致すれば手順書が正しく、ズレれば手順書への修正提案になる。\n\n'
@@ -36,6 +47,8 @@ done
   printf '生成前に対照実行（パッチ無しで全ゲートが pass すること）を確認している。\n'
   printf 'したがって ✅ の行は「パッチを当てたら、主張どおりの層のゲートが赤くなった」を意味する。\n'
   printf '❌ と ⚠️ の行はそうならなかったことを意味し、原因の分析は\n'
+  # 同上（Markdown のコードスパン表記。展開させない意図）
+  # shellcheck disable=SC2016
   printf '`docs/superpowers/phase0-findings.md` の「手順書への修正提案候補」に書く。\n\n'
   printf '一方、次は保証していない。読むときに補って解釈すること。\n\n'
   printf -- '- **どのルールが落としたかは見ていない。** 「実際に止めた層」の列はゲート単位であり、\n'
@@ -55,6 +68,9 @@ for case_dir in verification/cases/*/; do
     printf '| %s | (実行失敗) | | | ⚠️ 実行不能 |\n' "$case_id" >>"$WORK/rows.md"
     continue
   fi
+  # シングルクォートは Node の JS リテラル（テンプレートリテラルの ${...} 含む）を
+  # シェルに展開させない意図。SC2016 は偽陽性
+  # shellcheck disable=SC2016
   node -e '
     const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
     const mark = {
