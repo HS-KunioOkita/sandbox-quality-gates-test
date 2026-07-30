@@ -1,0 +1,16 @@
+# .semgrep/nestjs.yml
+rules:
+  - id: nest-controller-without-guard
+    message: |
+      Controller に認可ガードが設定されていません。
+      @UseGuards() を付与するか、意図的に公開する場合は @Public() を明示してください。
+    languages: [typescript]
+    severity: ERROR
+    patterns:
+      - pattern: |
+          @Controller(...)
+          class $C { ... }
+      - pattern-not: |
+          @UseGuards(...)
+          @Controller(...)
+          class $C { ... }
