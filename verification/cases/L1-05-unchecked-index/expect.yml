@@ -1,0 +1,7 @@
+id: L1-05-unchecked-index
+pitfall: 配列添字アクセスの undefined を考慮しない
+claimed_layer: L1
+expect:
+  l2-install: pass
+  l1-typecheck: fail
+  l1-lint: fail

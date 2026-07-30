@@ -1,0 +1,11 @@
+diff --git a/apps/web/src/api/client.ts b/apps/web/src/api/client.ts
+index 2d8173e..aa1101e 100644
+--- a/apps/web/src/api/client.ts
++++ b/apps/web/src/api/client.ts
+@@ -22,5 +22,5 @@ export async function fetchOrders(userId: string): Promise<OrderView[]> {
+     throw new Error(`注文の取得に失敗しました（HTTP ${response.status}）`);
+   }
+ 
+-  return (await response.json()) as OrderView[];
++  return (await response.json()) as any;
+ }
