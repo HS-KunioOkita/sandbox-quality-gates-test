@@ -438,6 +438,7 @@ git commit -m "feat: apps/api と apps/web の ESLint 設定を追加し既存�
   - `_lib.sh` が提供する関数:
     - `gate_require_repo` — git リポジトリの中でなければ exit 2（移動はしない）
     - `gate_require_cmd <コマンド名>` — 無ければ exit 2
+    - `gate_require_pnpm_tool <ツール名> <確認用引数...>` — `pnpm exec` 経由で起動できなければ exit 2
     - `gate_finish <生 exit code> <fail とみなす code のリスト>` — 正規化して exit する
   - **ゲートスクリプトはどのカレントディレクトリから呼んでも動く。** 各スクリプトが冒頭で自分の位置を起点にリポジトリルートへ移動するため。ハーネスも CI もこれに依存する
   - 全ゲートスクリプトの冒頭は次の定型で始まる。`_lib.sh` を相対パスで source するため、**`cd` が source より先でなければならない**
@@ -564,6 +565,18 @@ gate_require_repo() {
   fi
 }
 
+# pnpm exec 経由で使うツールが起動できることを確認する。起動できなければ error で終了する。
+#
+# pnpm exec は対象バイナリが見つからないとき pnpm 自身が 1 を返す。その 1 をそのまま
+# gate_finish に渡すと「ツールが実行できなかった」が「欠陥を検出した」と記録される。
+# node_modules が壊れている状態を「lint 違反あり」と読み違えるのが、この関数が防ぐ事故である。
+gate_require_pnpm_tool() {
+  if ! pnpm exec "$@" >/dev/null 2>&1; then
+    printf 'gate error: %s を実行できません（pnpm install が必要かもしれません）\n' "$1" >&2
+    exit "$GATE_ERROR"
+  fi
+}
+
 # 生 exit code を 3 値へ正規化して終了する。
 #   $1        生 exit code
 #   $2 以降   fail とみなす生 exit code（列挙）
@@ -630,6 +643,7 @@ source scripts/gates/_lib.sh
 
 gate_require_repo
 gate_require_cmd pnpm
+gate_require_pnpm_tool eslint --version
 
 pnpm exec eslint . --max-warnings=0
 # ESLint: 1 = lint エラーまたは警告数超過（fail）、2 = 設定エラー（error）
@@ -668,6 +682,7 @@ if [ "$raw" -ne 0 ]; then
   gate_finish "$raw" 1
 fi
 
+gate_require_pnpm_tool prisma --version
 pnpm --filter api exec prisma generate
 gate_finish "$?" 1
 ```
@@ -1242,15 +1257,46 @@ cd "$(git rev-parse --show-toplevel)"
 RESULTS=verification/RESULTS.md
 WORK=$(mktemp -d)
 
+# 対照実行。パッチを当てない状態で全ゲートが pass することを先に確かめる。
+#
+# これが崩れていると、パッチが何もしていなくても全ケースが「主張どおりの層が止めた」に
+# なり、表が全部 ✅ で埋まる。たとえば main 側に lint エラーが 1 つ混入するだけで、
+# 全ケースが blockedBy: [l1-lint] で match を返す。ケースの判定は、この対照が
+# 取れていることの上でしか意味を持たない。
+printf '=== baseline（パッチ無し） ===\n' >&2
+for gate in l2-install l1-typecheck l1-lint; do
+  "./scripts/gates/$gate.sh" >"$WORK/baseline-$gate.log" 2>&1
+  baseline_code=$?
+  if [ "$baseline_code" -ne 0 ]; then
+    printf 'エラー: baseline で %s が pass しませんでした（exit %s）\n' "$gate" "$baseline_code" >&2
+    printf '  パッチを当てていない状態でゲートが赤いので、ケースの判定は意味を持ちません。\n' >&2
+    printf '  先にリポジトリを緑にしてください。\n' >&2
+    tail -n 20 "$WORK/baseline-$gate.log" >&2
+    exit 2
+  fi
+done
+
 {
   printf '# 検証結果マトリクス\n\n'
   printf '`verification/run-all.sh` が生成する。手で編集しない。\n\n'
   printf '「手順書の主張」と「実際に止めた層」を並べるのがこの表の眼目である。\n'
   printf '一致すれば手順書が正しく、ズレれば手順書への修正提案になる。\n\n'
+  printf '## この表が保証していること・していないこと\n\n'
+  printf '生成前に対照実行（パッチ無しで全ゲートが pass すること）を確認している。\n'
+  printf 'したがって各行は「パッチを当てたら、主張どおりの層のゲートが赤くなった」を意味する。\n\n'
+  printf '一方、次は保証していない。読むときに補って解釈すること。\n\n'
+  printf '- **どのルールが落としたかは見ていない。** 「実際に止めた層」の列はゲート単位であり、\n'
+  printf '  意図したルールが発火したのか、パッチが誘発した別の違反で落ちたのかを区別しない。\n'
+  printf '  同じ層で止まる複数のケース（例: L1-01 と L1-02）は観測上まったく同一になる。\n'
+  printf '- **因果は保証していない。** ゲートが赤くなったことと、それがパッチのせいであることは\n'
+  printf '  別である。対照実行はこの隙間を狭めるが、閉じはしない。\n\n'
   printf '| ケース | 落とし穴 | 手順書の主張 | 実際に止めた層 | 判定 |\n'
   printf '|---|---|---|---|---|\n'
 } >"$WORK/head.md"
 
+# ケースが 1 つも無いとき glob が展開されずリテラルのまま残り、
+# `| * | (実行失敗) |` という嘘の行が出るのを防ぐ。
+shopt -s nullglob
 for case_dir in verification/cases/*/; do
   case_id=$(basename "$case_dir")
   printf '=== %s ===\n' "$case_id" >&2
@@ -1516,6 +1562,9 @@ git commit -m "feat: L1 検証ケース 3 本（any / 添字アクセス / eslin
 ## Task 6: 残り 3 ケースと全件実行
 
 **Files:**
+- Modify: `scripts/gates/_lib.sh`（`gate_require_pnpm_tool` を追加）
+- Modify: `scripts/gates/l1-lint.sh`、`scripts/gates/l2-install.sh`（ツール起動確認を追加）
+- Modify: `verification/run-all.sh`（対照実行・限界の明記・`nullglob`）
 - Create: `verification/cases/L1-03-floating-promise/{case.patch, expect.yml}`
 - Create: `verification/cases/L1-04-unused-disable/{case.patch, expect.yml}`
 - Create: `verification/cases/L1-06-web-imports-api/{case.patch, expect.yml}`
@@ -1525,6 +1574,116 @@ git commit -m "feat: L1 検証ケース 3 本（any / 添字アクセス / eslin
 **Interfaces:**
 - Consumes: `verification/run-all.sh`（Task 4）、Task 5 の 3 ケース
 - Produces: `verification/RESULTS.md` に L1 系 6 ケース全件の判定が入った状態
+
+- [ ] **Step 0: Task 5 レビューが出した 3 つの穴を塞ぐ**
+
+Task 5 のレビューが、ケースそのものではなくハーネス側に 3 つの穴を見つけた。ケースを増やす前にこれを塞ぐ。増やしてから塞ぐと、途中の実測がどちらの状態のものか分からなくなる。
+
+**(A) `pnpm exec` の失敗が「欠陥検出」と記録される。** `pnpm exec` は対象バイナリが見つからないとき pnpm 自身が 1 を返す（実測）。`l1-lint.sh` はそれを `gate_finish "$?" 1` に渡すので、`node_modules` が壊れている状態が「lint 違反あり」と記録される。設計書 §6.1 が最重要と書いた誤記録そのものである。
+
+`scripts/gates/_lib.sh` の `gate_finish` の定義の直前に次を挿入する。
+
+```bash
+# pnpm exec 経由で使うツールが起動できることを確認する。起動できなければ error で終了する。
+#
+# pnpm exec は対象バイナリが見つからないとき pnpm 自身が 1 を返す。その 1 をそのまま
+# gate_finish に渡すと「ツールが実行できなかった」が「欠陥を検出した」と記録される。
+# node_modules が壊れている状態を「lint 違反あり」と読み違えるのが、この関数が防ぐ事故である。
+gate_require_pnpm_tool() {
+  if ! pnpm exec "$@" >/dev/null 2>&1; then
+    printf 'gate error: %s を実行できません（pnpm install が必要かもしれません）\n' "$1" >&2
+    exit "$GATE_ERROR"
+  fi
+}
+```
+
+`scripts/gates/l1-lint.sh` の `gate_require_cmd pnpm` の直後に 1 行足す。
+
+```bash
+gate_require_pnpm_tool eslint --version
+```
+
+`scripts/gates/l2-install.sh` の `pnpm --filter api exec prisma generate` の直前に 1 行足す。
+
+```bash
+gate_require_pnpm_tool prisma --version
+```
+
+`l1-typecheck.sh` は turbo 経由なので対象外である（turbo 自身の異常は 1 で、すでに error 側に写像されている）。
+
+**(B) 対照実行が無い。** `run-all.sh` は「パッチを当てない状態で全ゲートが pass する」ことを一度も確認しない。main 側に lint エラーが 1 つ混入するだけで、全ケースが `blockedBy: [l1-lint]` で `match` を返し、パッチが何もしていなくても表が全部 ✅ になる。
+
+`verification/run-all.sh` の `WORK=$(mktemp -d)` の直後に対照実行を挿入する。
+
+```bash
+# 対照実行。パッチを当てない状態で全ゲートが pass することを先に確かめる。
+#
+# これが崩れていると、パッチが何もしていなくても全ケースが「主張どおりの層が止めた」に
+# なり、表が全部 ✅ で埋まる。たとえば main 側に lint エラーが 1 つ混入するだけで、
+# 全ケースが blockedBy: [l1-lint] で match を返す。ケースの判定は、この対照が
+# 取れていることの上でしか意味を持たない。
+printf '=== baseline（パッチ無し） ===\n' >&2
+for gate in l2-install l1-typecheck l1-lint; do
+  "./scripts/gates/$gate.sh" >"$WORK/baseline-$gate.log" 2>&1
+  baseline_code=$?
+  if [ "$baseline_code" -ne 0 ]; then
+    printf 'エラー: baseline で %s が pass しませんでした（exit %s）\n' "$gate" "$baseline_code" >&2
+    printf '  パッチを当てていない状態でゲートが赤いので、ケースの判定は意味を持ちません。\n' >&2
+    printf '  先にリポジトリを緑にしてください。\n' >&2
+    tail -n 20 "$WORK/baseline-$gate.log" >&2
+    exit 2
+  fi
+done
+```
+
+**(C) どのルールが落としたかを見ていない。** `blockedBy` はゲート単位なので、L1-01 と L1-02 は観測上まったく同一（両方 `["l1-lint"]`）になる。意図したルールが発火したのか、パッチが誘発した別の違反で落ちたのかを区別できない。
+
+これは実装せず、**`RESULTS.md` に限界として明記する**（ルール ID の照合は Phase 2 以降の検討事項）。`run-all.sh` のヘッダ生成ブロックを次に差し替える。
+
+```bash
+{
+  printf '# 検証結果マトリクス\n\n'
+  printf '`verification/run-all.sh` が生成する。手で編集しない。\n\n'
+  printf '「手順書の主張」と「実際に止めた層」を並べるのがこの表の眼目である。\n'
+  printf '一致すれば手順書が正しく、ズレれば手順書への修正提案になる。\n\n'
+  printf '## この表が保証していること・していないこと\n\n'
+  printf '生成前に対照実行（パッチ無しで全ゲートが pass すること）を確認している。\n'
+  printf 'したがって各行は「パッチを当てたら、主張どおりの層のゲートが赤くなった」を意味する。\n\n'
+  printf '一方、次は保証していない。読むときに補って解釈すること。\n\n'
+  printf -- '- **どのルールが落としたかは見ていない。** 「実際に止めた層」の列はゲート単位であり、\n'
+  printf '  意図したルールが発火したのか、パッチが誘発した別の違反で落ちたのかを区別しない。\n'
+  printf '  同じ層で止まる複数のケース（例: L1-01 と L1-02）は観測上まったく同一になる。\n'
+  printf -- '- **因果は保証していない。** ゲートが赤くなったことと、それがパッチのせいであることは\n'
+  printf '  別である。対照実行はこの隙間を狭めるが、閉じはしない。\n\n'
+  printf '| ケース | 落とし穴 | 手順書の主張 | 実際に止めた層 | 判定 |\n'
+  printf '|---|---|---|---|---|\n'
+} >"$WORK/head.md"
+```
+
+併せて `for case_dir in verification/cases/*/; do` の直前に次を入れる。ケースが 0 件のとき glob がリテラルのまま残り、`| * | (実行失敗) |` という嘘の行が出るのを防ぐ。
+
+```bash
+shopt -s nullglob
+```
+
+- [ ] **Step 0b: 塞いだことを確認する**
+
+```bash
+./scripts/gates/gates.test.sh | tail -2
+pnpm exec eslint . --max-warnings=0; echo "LINT=$?"
+bash -n verification/run-all.sh && echo "run-all.sh 構文 OK"
+```
+
+Expected: ゲートのテスト 6 件成功、`LINT=0`、構文 OK。
+
+`gate_require_pnpm_tool` の error 経路は `gates.test.sh` では試さない（`node_modules` を壊す必要があり、副作用が大きすぎる）。**これは Task 3 の fail 経路と同じ穴である**ことを自覚しておく。
+
+- [ ] **Step 0c: コミット**
+
+```bash
+git add scripts/gates verification/run-all.sh
+git commit -m "fix: ツール起動確認と対照実行を追加し RESULTS.md に限界を明記"
+```
 
 - [ ] **Step 1: `L1-03-floating-promise` のパッチを作る**
 
