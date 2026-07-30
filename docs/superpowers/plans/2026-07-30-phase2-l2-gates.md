@@ -875,6 +875,25 @@ for gate in "${GATE_ORDER[@]}"; do
   check "$gate はツールが無いとき error" 2 "$?"
 done
 
+# --- Docker ゲートはデーモンに到達できないとき error(2) ---
+# PATH を絞る上のテストでは docker バイナリ自体が消えるので gate_require_cmd で止まり、
+# gate_require_docker の本体である docker info の分岐に到達しない。設計書 §6.1 が
+# 「このハーネス最大の誤判定リスク」と呼ぶのはデーモン不在の方なので、そこを直接突く。
+# DOCKER_HOST を存在しないソケットに向ければ、バイナリは在るまま到達不能を作れる
+# （Docker Desktop を止める必要はない。Task 2 で実測）。
+for gate in l2-semgrep l2-osv l2-gitleaks; do
+  out=$( DOCKER_HOST=unix:///nonexistent/docker.sock "./scripts/gates/$gate.sh" 2>&1 )
+  code=$?
+  check "$gate はデーモンに到達できないとき error" 2 "$code"
+  # exit code だけでは 2 つのガードを区別できない。メッセージで到達点を確かめる。
+  case "$out" in
+    *'Docker デーモンが起動していません'*)
+      check "$gate は docker info の分岐に到達する" 'daemon-msg' 'daemon-msg' ;;
+    *)
+      check "$gate は docker info の分岐に到達する" 'daemon-msg' 'other-msg' ;;
+  esac
+done
+
 # --- 非ブロックゲートは比較対象が無いとき error(2) ---
 ( GATE_BASE_REF=no-such-ref ./scripts/gates/l2-new-deps.sh ) >/dev/null 2>&1
 check 'l2-new-deps は比較対象が無いとき error' 2 "$?"
@@ -902,7 +921,11 @@ exit 1
 ./scripts/gates/gates.test.sh
 ```
 
-期待: **21 件成功**（`GATE_ORDER` 6 本 × 3 経路 = 18、`l2-new-deps` が pass・無検出・error の 3 件）。`FAILURES` が 0 であること、および `l2-install` を含む全ゲートが 3 経路とも測られていることを確認する。
+期待: **27 件成功**（`GATE_ORDER` 6 本 × 3 経路 = 18、Docker ゲート 3 本 × 2 チェック = 6、`l2-new-deps` が pass・無検出・error の 3 件）。
+
+**件数は実測に合わせること。** 大事なのは `FAILURES` が 0 であることと、次の 3 点が測られていること: (a) `l2-install` を含む全ゲートが pass 経路を通る、(b) 全ゲートがツール不在で error(2) を返す、(c) **Docker ゲート 3 本がデーモン到達不能でも error(2) を返し、しかも `gate_require_cmd` ではなく `docker info` の分岐で止まっている**。
+
+(c) を入れる理由は Task 2 のレビューで判明した穴である。`PATH=/usr/bin:/bin` は `docker` バイナリを消すので `gate_require_cmd docker` で止まり、`gate_require_docker` の本体には一度も到達しない。exit code はどちらも 2 なので、**exit code だけを見ていると「デーモン不在を error に落とす」というこのガードの主目的が未検証のまま緑になる。**
 
 - [ ] **Step 5: shellcheck を全ゲートに通す**
 
