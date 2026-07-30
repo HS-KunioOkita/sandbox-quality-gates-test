@@ -32,6 +32,10 @@
 | M14 | 架空パッケージ名 `nestjs-order-discount-helper` | npm に**存在しない**（E404） |
 | M15 | `dayjs@1.11.21` | 実在。公開は 2026-05-26（`minimumReleaseAge: 10080`＝7 日を満たす） |
 | M16 | 手順書 §3.2 の `.semgrep.yml`（`rules: []`）を単独で `--config` に渡す | **exit 0、`Nothing to scan.`**。設定エラーにならないので、これだけでゲートを組むと永久に緑で何も走らない |
+| M17 | gitleaks と semgrep を**リポジトリ全体**に当てる | **検証ケースのパッチと設計/計画ドキュメント自身に反応する。** `case.patch` に秘密を書けば gitleaks 2 件 / semgrep 1 件、この計画書に偽キーを書けば gitleaks 4 件 / semgrep 3 件。**対策しないと baseline が赤くなり `run-all.sh` は先頭で止まる** |
+| M18 | gitleaks の除外 | `.gitleaks.toml` の**自動検出は効かない**（`--config` の明示が必要）。`File` は `/src/...` の絶対パスなので `^` 固定の相対パス正規表現は一致しない。パス指定の allowlist なら効き、**`apps/` 配下に同じ鍵を置けば exit 1 のまま**（ガードが残る） |
+| M19 | semgrep の除外 | `.semgrepignore` に `verification/cases/` と `docs/` を書けば findings が消える。**独自の `.semgrepignore` を置いても `node_modules` は除外されたまま**（走査対象 68 ファイル） |
+| M20 | `$queryRawUnsafe` の文字列連結に対する semgrep | **`p/typescript` / `p/nodejs` / `p/react` / `p/owasp-top-ten` / `p/secrets` のいずれも反応しない。** L2-05 は `not-caught` になる見込み |
 
 ## Global Constraints
 
@@ -57,6 +61,8 @@
 | `scripts/gates/l2-gitleaks.sh` | gitleaks ゲート（ブロック） |
 | `scripts/gates/l2-semgrep.sh` | Semgrep ゲート（ブロック） |
 | `scripts/gates/l2-new-deps.sh` | 新規依存検出（非ブロック。出力で判定） |
+| `.gitleaks.toml` | gitleaks の allowlist。検証ケースのパッチと docs を**パスで**除外する（M17 / M18） |
+| `.semgrepignore` | semgrep の走査除外。同上（M17 / M19） |
 | `.semgrep.yml` | 手順書 §3.2 のルールセット指定ファイル |
 | `.semgrep/nestjs.yml` | 手順書 §3.2 の NestJS カスタムルール |
 | `verification/cases/L2-01-phantom-package/` | 架空パッケージ |
@@ -335,15 +341,53 @@ git commit -m "feat: L2 の OSV-Scanner ゲートと Docker 不在ガードを�
 ## Task 3: `l2-gitleaks.sh`（秘密混入ゲート）
 
 **Files:**
+- Create: `.gitleaks.toml`
 - Create: `scripts/gates/l2-gitleaks.sh`
 
 **Interfaces:**
 - Consumes: `_lib.sh` の `gate_require_docker` / `GATE_IMG_GITLEAKS` / `gate_finish`（Task 2）
-- Produces: なし（ゲート単体）
+- Produces: `.gitleaks.toml` の allowlist（Task 13 の `L2-03` がこれを前提にする）
 
 手順書 §3.3 ③ は `gitleaks detect --no-git --redact` と書く。M8 のとおり `detect` は 8.30.1 の `--help` に載らない非推奨サブコマンドだが動作する。**手順書のコマンドをそのまま検証するのが目的なので `detect` を使う。** 非推奨であること自体を §1 の修正提案として記録する。
 
-- [ ] **Step 1: `l2-gitleaks.sh` を書く**
+- [ ] **Step 1: 現状が赤いことを自分の目で確認する**
+
+M17 のとおり、**この計画書自身に書いた偽の鍵に gitleaks が反応する**。対策前の状態を先に見ておく。
+
+```bash
+docker run --rm -v "$PWD:/src:ro" zricethezav/gitleaks:v8.30.1 detect --no-git --redact --source=/src
+echo "exit=$?"
+```
+
+期待: **exit 1、`leaks found: 4`**。4 件すべて `docs/superpowers/plans/2026-07-30-phase2-l2-gates.md`。
+
+- [ ] **Step 2: `.gitleaks.toml` を作る**
+
+リポジトリ全体を走査するゲートは、**意図的に秘密らしい文字列を書いたファイル**に必ず反応する。検証ケースのパッチ（Task 13 が作る）と設計/計画ドキュメントがそれである。
+
+```toml
+# gitleaks の allowlist。
+#
+# 検証ケースのパッチと設計/計画ドキュメントは、意図的に秘密らしい文字列を含む。
+# これらは「適用前の記述」なので走査しない。
+#
+# 除外は必ず「パス」で行い、「値」で行わないこと。値で除外すると、L2-03 のパッチを
+# 適用して apps/ 配下に同じ文字列が現れたときも除外され、ゲートが空振りする。
+# それでは L2-03 が「gitleaks は秘密を検出しなかった」という誤った結果を出す。
+[extend]
+useDefault = true
+
+[allowlist]
+description = "検証ケースのパッチと設計/計画ドキュメントは意図的に秘密らしい文字列を含む"
+paths = [
+  '''verification/cases/.*\.patch$''',
+  '''docs/.*\.md$''',
+]
+```
+
+**正規表現を `^verification/...` のように先頭固定しないこと。** M18 のとおり gitleaks が照合するパスは `/src/verification/...` の絶対パスなので、先頭固定すると一致せず allowlist が無言で効かなくなる。
+
+- [ ] **Step 3: `l2-gitleaks.sh` を書く**
 
 ```bash
 #!/usr/bin/env bash
@@ -355,6 +399,8 @@ git commit -m "feat: L2 の OSV-Scanner ゲートと Docker 不在ガードを�
 #
 # なお `dir` に `--no-git` を渡すと exit 126（unknown flag）になる。126 は fail に
 # 写像してはいけない。書式ミスを「秘密を検出した」と読み違えることになる。
+#
+# --config を明示するのは、.gitleaks.toml の自動検出が効かないため（実測）。
 set -uo pipefail
 
 _gate_dir="${BASH_SOURCE[0]%/*}"
@@ -366,7 +412,8 @@ source scripts/gates/_lib.sh
 gate_require_repo
 gate_require_docker
 
-docker run --rm -v "$PWD:/src:ro" "$GATE_IMG_GITLEAKS" detect --no-git --redact --source=/src
+docker run --rm -v "$PWD:/src:ro" "$GATE_IMG_GITLEAKS" \
+  detect --no-git --redact --source=/src --config /src/.gitleaks.toml
 # gitleaks は漏洩を見つけると 1 を返す。書式ミスは 126、その他の異常も非ゼロなので
 # error 側に残す。
 gate_finish "$?" 1
@@ -376,21 +423,22 @@ gate_finish "$?" 1
 chmod +x scripts/gates/l2-gitleaks.sh
 ```
 
-- [ ] **Step 2: クリーンなツリーで pass することを確認する**
+- [ ] **Step 4: クリーンなツリーで pass することを確認する**
 
 ```bash
 ./scripts/gates/l2-gitleaks.sh; echo "exit=$?"
 ```
-期待: exit 0、`no leaks found`。
 
-- [ ] **Step 3: Docker が無いときに error(2) になることを確認する**
+期待: exit 0、`no leaks found`。Step 1 で 4 件出ていたものが 0 になる。**Step 1 の 4 件を見ていないと、この 0 が「allowlist が効いた」のか「そもそも走査していない」のか区別できない。**
+
+- [ ] **Step 5: Docker が無いときに error(2) になることを確認する**
 
 ```bash
 ( PATH=/usr/bin:/bin ./scripts/gates/l2-gitleaks.sh ) >/dev/null 2>&1; echo "exit=$?"
 ```
 期待: exit 2。
 
-- [ ] **Step 4: 実在形式の鍵を置いて赤くなることを確認する**
+- [ ] **Step 6: 実在形式の鍵を置いて赤くなることを確認する**
 
 **このステップを飛ばしてはいけない。** M10 のとおり、AWS の公式ドキュメント例示キー `AKIAIOSFODNN7EXAMPLE` は gitleaks の既定 allowlist に入っており**検出されない**。例示キーで確認して緑を見て「gitleaks は動いている」と結論すると誤る。
 
@@ -404,19 +452,21 @@ cp /tmp/leakprobe.ts apps/api/src/leakprobe.ts
 ```
 期待: **exit 1**、`leaks found: 2`。
 
+**これが `apps/` 配下では allowlist が効かないことの確認である。** ここが exit 0 になったら allowlist が広すぎるので、`paths` の正規表現を見直すこと。
+
 ```bash
 rm apps/api/src/leakprobe.ts
 git status --porcelain   # 空であること
 ./scripts/gates/l2-gitleaks.sh; echo "exit=$?"   # 0 に戻ること
 ```
 
-**Step 4 で使った鍵の形式を記録しておくこと。** Task 13 の `L2-03-hardcoded-secret` で同じ判断が必要になる。
+**このステップで使った鍵の形式を記録しておくこと。** Task 13 の `L2-03-hardcoded-secret` で同じ判断が必要になる。
 
-- [ ] **Step 5: コミット**
+- [ ] **Step 7: コミット**
 
 ```bash
-git add scripts/gates/l2-gitleaks.sh
-git commit -m "feat: L2 の gitleaks ゲートを追加"
+git add .gitleaks.toml scripts/gates/l2-gitleaks.sh
+git commit -m "feat: L2 の gitleaks ゲートと allowlist を追加"
 ```
 
 ---
@@ -425,12 +475,13 @@ git commit -m "feat: L2 の gitleaks ゲートを追加"
 
 **Files:**
 - Create: `.semgrep.yml`
+- Create: `.semgrepignore`
 - Create: `.semgrep/nestjs.yml`
 - Create: `scripts/gates/l2-semgrep.sh`
 
 **Interfaces:**
 - Consumes: `_lib.sh` の `gate_require_docker` / `GATE_IMG_SEMGREP` / `gate_finish`（Task 2）
-- Produces: カスタムルール ID `nest-controller-without-guard`。Task 12 の `L2-02-guard-missing` がこれを当てにする
+- Produces: カスタムルール ID `nest-controller-without-guard`。Task 12 の `L2-02-guard-missing` がこれを当てにする。`.semgrepignore` の除外（Task 13 の `L2-03` がこれを前提にする）
 
 **仮説 1 の結論をこのタスクで出す。** M4・M5・M6 のとおり、事前の想定（「`semgrep ci` はトークン前提で動かない」）は誤りで、実態はもっと悪い。`semgrep ci` は `--error` を受け付けず（M6）、`--config` 無しなら**何もせず exit 0 を返す**（M5）。ゲートには `semgrep scan` を使う。
 
@@ -494,7 +545,24 @@ rules:
           class $C { ... }
 ```
 
-- [ ] **Step 4: `l2-semgrep.sh` を書く**
+- [ ] **Step 4: `.semgrepignore` を作る**
+
+M17 のとおり、semgrep も検証ケースのパッチと計画ドキュメントの偽キーに反応する（`p/secrets` の `detected-aws-access-key-id-value` など）。gitleaks と同じ理由で**パスで除外する**。
+
+```gitignore
+# semgrep の走査対象から外すパス。
+#
+# 検証ケースのパッチと設計/計画ドキュメントは、意図的に秘密らしい文字列や
+# 脆弱なコード片を含む。これらは「適用前の記述」なので走査しない。
+# パッチを適用したあとの apps/ 配下の実ファイルは走査対象のまま残る。
+#
+# 独自の .semgrepignore は semgrep の既定を置き換えるが、semgrep は git 追跡
+# ファイルのみを走査するので node_modules は除外されたまま（実測: 走査対象 68 ファイル）。
+verification/cases/
+docs/
+```
+
+- [ ] **Step 5: `l2-semgrep.sh` を書く**
 
 ```bash
 #!/usr/bin/env bash
@@ -535,21 +603,24 @@ chmod +x scripts/gates/l2-semgrep.sh
 
 `--config .semgrep.yml` は上のコマンドには含めない。Step 2 のとおりルールが空で何も足さないため、含めても挙動は変わらないが、含めると「手順書のファイルが効いている」という誤解を生む。**ファイルは手順書どおりに残しつつ、ゲートでは使わない**という形にして、その理由を §1 に書く。
 
-- [ ] **Step 5: クリーンなツリーで pass することを確認する**
+- [ ] **Step 6: クリーンなツリーで pass することを確認する**
 
 ```bash
 ./scripts/gates/l2-semgrep.sh; echo "exit=$?"
 ```
-期待: exit 0、`Findings: 0`。Task 1 の供給網設定が入っていないとここは 1 になる。
 
-- [ ] **Step 6: Docker が無いときに error(2) になることを確認する**
+期待: exit 0、`Findings: 0`。
+
+ここが 1 になる原因は 2 つある。**どちらなのかをログで確かめること。** (a) Task 1 の供給網設定が入っていない → `pnpm-workspace.yaml:1` に 3 件。(b) Step 4 の `.semgrepignore` が効いていない → `docs/superpowers/plans/2026-07-30-phase2-l2-gates.md` に `detected-aws-*` が 3 件。
+
+- [ ] **Step 7: Docker が無いときに error(2) になることを確認する**
 
 ```bash
 ( PATH=/usr/bin:/bin ./scripts/gates/l2-semgrep.sh ) >/dev/null 2>&1; echo "exit=$?"
 ```
 期待: exit 2。
 
-- [ ] **Step 7: カスタムルールが実際に発火することを確認する（仮説 5）**
+- [ ] **Step 8: カスタムルールが実際に発火することを確認する（仮説 5）**
 
 **このステップを飛ばしてはいけない。** findings 0 は「ルールが正しく除外した」と「ルールが一度も一致しなかった」を区別しない。
 
@@ -567,12 +638,11 @@ git checkout -- apps/api/src/orders/orders.controller.ts
 
 M11 のとおり、現在の `@Controller('orders')` → `@UseGuards(AuthGuard)` の順で偽陽性は出ない。手順書の `pattern-not` は `@UseGuards` → `@Controller` の順しか書いていないが、semgrep のデコレータパターンは順序に非依存である。**申し送り #6 が懸念した偽陽性は発生しない。** これが仮説 5 の結論になる。
 
-- [ ] **Step 8: コミット**
+- [ ] **Step 9: コミット**
 
 ```bash
-git add .semgrep/ scripts/gates/l2-semgrep.sh
-git add .semgrep.yml 2>/dev/null || true   # Step 2 で残した場合のみ
-git commit -m "feat: L2 の Semgrep ゲートと NestJS カスタムルールを追加"
+git add .semgrep.yml .semgrepignore .semgrep/ scripts/gates/l2-semgrep.sh
+git commit -m "feat: L2 の Semgrep ゲート・カスタムルール・走査除外を追加"
 ```
 
 ---
@@ -1808,7 +1878,7 @@ git commit -m "test: L2-02（ガード欠落）と L2-05（SQL インジェク�
 
 - [ ] **Step 6: 実測に合わせて `expect` を更新し、結果を控える**
 
-**`L2-05` で semgrep が反応しない可能性がある。** `p/typescript` / `p/nodejs` / `p/owasp-top-ten` に Prisma の `$queryRawUnsafe` を見るルールがあるかは未確認である。反応しなかった場合:
+**`L2-05` で semgrep は反応しない見込みである（M20）。** 計画作成時に `$queryRawUnsafe` の文字列連結を含むファイルを 5 つのルールセット全部にかけたが、findings は 0 だった。したがって次の手順は「例外処理」ではなく**想定される本筋**である。
 
 1. `expect` の `l2-semgrep` を `pass` に直す（**`claimed_layer` と `claimed_gate` と `case.patch` は変えない**）
 2. `claimVerdict` は `not-caught` か、L1 が反応していれば `mismatch` になる
@@ -1962,11 +2032,14 @@ Phase 2 の完了条件はこの 4 つに結論を出すことである（設計
 - **`semgrep ci` は `--error` を受け付けず、`--config` 無しなら空振りする**（M5 / M6）
 - **手順書 §3.2 の `.semgrep.yml`（`rules: []`）は単独では何も走らせない**（M16）。設定エラーにならず exit 0 を返すので、これをゲートにすると永久に緑になる。実際のルールセットは CLI の `--config p/...` 側にあり、このファイルは役割を持っていない
 - **`pnpm-workspace.yaml` の `allowBuilds` の `'@prisma/client': true`**（Task 1 Step 6 の実測結果を書く）
-- **「ゲートが緑」と「ゲートが守っている」は別物である（Phase 2 で 3 回観測）。** §1.13 の表に Phase 2 の 3 件を追記する: (a) `semgrep ci` が `--config` 無しで exit 0（M5）、(b) `.semgrep.yml` の `rules: []` が exit 0 で何も走らせない（M16）、(c) gitleaks が AWS 公式例示キーを検出しない（M10）。**いずれも「手順書のとおりに導入して緑を確認する」だけでは気づけない**
+- **「ゲートが緑」と「ゲートが守っている」は別物である（Phase 2 で 4 回観測）。** §1.13 の表に Phase 2 の 4 件を追記する: (a) `semgrep ci` が `--config` 無しで exit 0（M5）、(b) `.semgrep.yml` の `rules: []` が exit 0 で何も走らせない（M16）、(c) gitleaks が AWS 公式例示キーを検出しない（M10）、(d) 偽陽性を値ベースの allowlist で黙らせると、欠陥を仕込んだあとも黙るので秘密検出ゲートが空振りする（Task 3 Step 2 / Step 6）。**いずれも「手順書のとおりに導入して緑を確認する」だけでは気づけない**
 - **`osv-scanner --lockfile=` をゲートにすると、直接指定していない推移的依存の脆弱性で赤くなる。** 手順書 §3.3 ② は抑制手段（`overrides` や `osv-scanner.toml`）にも、その運用負荷にも触れていない
 - **手順書 §3.3 は pnpm 側の供給網設定（`blockExoticSubdeps` / `minimumReleaseAge` / `trustPolicy`）に触れていない。** semgrep の `p/nodejs` はこれらを ERROR ではなく MEDIUM で要求してくる
 - **`gitleaks detect` は 8.30.1 で非推奨**（`--help` に載らない）。現行は `gitleaks dir`。ただし `dir` に `--no-git` を渡すと exit 126 になる
 - **gitleaks は AWS 公式例示キーを検出しない。** 手順書に従って導入したことを例示キーで確認すると、空振りしているゲートを緑と誤認する
+- **手順書 §3.3 ③ の `gitleaks detect --no-git` はリポジトリ全体を走査するため、ドキュメントや検証用フィクスチャに例示鍵を書くと赤くなる**（M17）。手順書は抑制手段（`.gitleaks.toml` の allowlist）にも、その運用が必要になることにも触れていない。同じ問題が `p/secrets` を含む semgrep にも起きる。**除外は必ずパスで行い値で行わないこと**（値で除外すると欠陥を仕込んだあとも除外され、ゲートが空振りする）も手順書に無い注意点である
+- **`.gitleaks.toml` の自動検出は効かない**（M18）。`--config` の明示が必要で、照合パスは `--source` を起点とした絶対パスになる
+- **手順書 §3.2 のルールセット選定では SQL インジェクション（`$queryRawUnsafe` の文字列連結）を拾えない**（M20）。5 つのルールセット全部にかけて findings 0。§3.2 が「認可は SAST が最も苦手」とだけ注意しているが、実測では生 SQL の組み立ても拾えていない
 - **手順書 §3.3 の `git diff -- '**/package.json'` のパススペック**（Task 5 Step 1 の実測結果を書く）
 - **手順書 §3.3 の `grep -E '^\+\s+"'` は依存の追加以外にも反応する**（scripts の追加、版の変更）
 - Task 10 Step 3 で L2 ゲートが L1 ケースに反応した場合は、**手順書 §10 の層の割り当てが排他的でない**という発見として書く
