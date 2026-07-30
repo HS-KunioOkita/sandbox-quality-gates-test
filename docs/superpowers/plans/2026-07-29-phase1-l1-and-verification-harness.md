@@ -1336,14 +1336,15 @@ git commit -m "feat: 検証ハーネス（run-case / run-all / judge）を追加
 `case.patch` は手で書かず、実際に編集して `git diff` で出力する。
 
 ```bash
-# 1. 一時ブランチで編集
-git checkout -b tmp-make-patch
+mkdir -p verification/cases/<CASE-ID>
 # ... ファイルを編集 ...
 git diff > verification/cases/<CASE-ID>/case.patch
 git checkout -- .
-git checkout main
-git branch -D tmp-make-patch
 ```
+
+**一時ブランチは作らない。** パッチ作成はコミットを伴わないので、追跡ファイルを編集して
+`git diff` を取り、`git checkout -- .` で戻すだけで足りる。`verification/cases/` は未追跡
+なので `git diff` には現れない。ブランチを切ると、戻り先を間違えたときに気づきにくい。
 
 **パッチは context 付き（既定の 3 行）で作る。** 周辺コードが変わったときに黙って別の場所に当たるのではなく、失敗して気づけるようにするため。設計書 §8.3 の「パッチが当たらない → 即中断」はこの前提に立っている。
 
@@ -1358,13 +1359,10 @@ git branch -D tmp-make-patch
 ```
 
 ```bash
-git checkout -b tmp-make-patch
-# 上記の編集を apps/web/src/api/client.ts に加える
 mkdir -p verification/cases/L1-02-explicit-any
+# 上記の編集を apps/web/src/api/client.ts に加える
 git diff > verification/cases/L1-02-explicit-any/case.patch
 git checkout -- .
-git checkout main
-git branch -D tmp-make-patch
 ```
 
 パッチの中身を目で確認し、`-  return (await response.json()) as OrderView[];` と `+  return (await response.json()) as any;` の 2 行だけが変更になっていることを確かめる。
@@ -1417,13 +1415,10 @@ export function firstProductName(orders: readonly OrderView[]): string {
 `noUncheckedIndexedAccess: true` により `orders[0]` は `OrderView | undefined` なので、`.productName` へのアクセスが型エラーになる。
 
 ```bash
-git checkout -b tmp-make-patch
-# 上記の関数を apps/web/src/features/orders/orderTotal.ts の末尾に追加
 mkdir -p verification/cases/L1-05-unchecked-index
+# 上記の関数を apps/web/src/features/orders/orderTotal.ts の末尾に追加
 git diff > verification/cases/L1-05-unchecked-index/case.patch
 git checkout -- .
-git checkout main
-git branch -D tmp-make-patch
 ```
 
 - [ ] **Step 6: `L1-05-unchecked-index` の `expect.yml` を作る**
@@ -1461,13 +1456,10 @@ Expected: `"claimVerdict":"match"`。`configVerdict` が `mismatch` なら `expe
 ```
 
 ```bash
-git checkout -b tmp-make-patch
-# 上記の 1 行を apps/api/src/orders/orders.service.ts の先頭に追加
 mkdir -p verification/cases/L1-01-eslint-disable-abuse
+# 上記の 1 行を apps/api/src/orders/orders.service.ts の先頭に追加
 git diff > verification/cases/L1-01-eslint-disable-abuse/case.patch
 git checkout -- .
-git checkout main
-git branch -D tmp-make-patch
 ```
 
 - [ ] **Step 9: `L1-01-eslint-disable-abuse` の `expect.yml` を作る**
@@ -1538,13 +1530,10 @@ git commit -m "feat: L1 検証ケース 3 本（any / 添字アクセス / eslin
 `await` を消すと `orders` が Promise になり、`orders.map` が型エラーになる。**つまり typecheck でも止まる。** それを含めて記録する。
 
 ```bash
-git checkout -b tmp-make-patch
-# apps/api/src/orders/orders.service.ts の findByUser から await を削除
 mkdir -p verification/cases/L1-03-floating-promise
+# apps/api/src/orders/orders.service.ts の findByUser から await を削除
 git diff > verification/cases/L1-03-floating-promise/case.patch
 git checkout -- .
-git checkout main
-git branch -D tmp-make-patch
 ```
 
 - [ ] **Step 2: `L1-03-floating-promise` の `expect.yml` を作る**
@@ -1581,13 +1570,10 @@ export function applyDiscount(price: number, isMember: boolean): number {
 `require-description` が有効なので `--` 以降の理由は必須である。理由を書いた上で「効いていない」ことを検出できるかが、このケースの検証内容である。
 
 ```bash
-git checkout -b tmp-make-patch
-# 上記のコメントを apps/api/src/discount/discount.ts に追加
 mkdir -p verification/cases/L1-04-unused-disable
+# 上記のコメントを apps/api/src/discount/discount.ts に追加
 git diff > verification/cases/L1-04-unused-disable/case.patch
 git checkout -- .
-git checkout main
-git branch -D tmp-make-patch
 ```
 
 - [ ] **Step 5: `L1-04-unused-disable` の `expect.yml` を作る**
@@ -1632,13 +1618,10 @@ export function recomputeDiscount(order: OrderView): number {
 `import` 文はファイル先頭にまとめる必要があるため、既存の `import type { OrderView } ...` の直後に置く。
 
 ```bash
-git checkout -b tmp-make-patch
-# 上記の import を既存 import の直後に、recomputeDiscount をファイル末尾に追加する
 mkdir -p verification/cases/L1-06-web-imports-api
+# 上記の import を既存 import の直後に、recomputeDiscount をファイル末尾に追加する
 git diff > verification/cases/L1-06-web-imports-api/case.patch
 git checkout -- .
-git checkout main
-git branch -D tmp-make-patch
 ```
 
 **このケースは typecheck も落ちる可能性が高い。** `apps/web/tsconfig.json` の `include` は `src/**` と `e2e/**` だけなので、`apps/api/src` のファイルは web のプロジェクトに含まれず解決できない。実行して確認し、実測に合わせて `expect.yml` を書く。
