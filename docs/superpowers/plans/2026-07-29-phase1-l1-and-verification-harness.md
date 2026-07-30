@@ -78,7 +78,9 @@
 ### 記述ルール
 
 - コメント・エラーメッセージ・`RESULTS.md` の記述は日本語で書く。
-- シェルスクリプトは `#!/usr/bin/env bash` と `set -euo pipefail` で始める。
+- シェルスクリプトは `#!/usr/bin/env bash` と `set -uo pipefail` で始める。**`-e` は付けない。**
+  ゲートスクリプトはツールの非ゼロ exit を捕まえて `gate_finish` に渡す必要があり、`-e` があると
+  その時点で終了してしまう。ハーネスも同じ理由で `-e` を使わない。
 - `verification/cases/` 配下のディレクトリ名は設計書 §9 の ID をそのまま使う。
 
 ---
@@ -1191,6 +1193,15 @@ if git show-ref --quiet "refs/heads/$BRANCH"; then
 fi
 
 BASE_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+# detached HEAD だと BASE_BRANCH が文字列 HEAD になる。すると cleanup の
+# `git checkout HEAD` は「今のコミットで detach する」＝欠陥コミットに留まる動作になり、
+# branch -D も成功し、事後ガードの HEAD != BASE_BRANCH も HEAD != HEAD で偽になって
+# すべてすり抜ける。ユーザーは欠陥コミット上に置き去りにされ、git status はクリーンなので
+# 気づけない。入口で弾く。
+if [ "$BASE_BRANCH" = "HEAD" ]; then
+  printf 'エラー: detached HEAD では実行できません。ブランチをチェックアウトしてください\n' >&2
+  exit 2
+fi
 WORK=$(mktemp -d)
 ACTUAL="$WORK/actual.tsv"
 LOGS="$WORK/logs"
@@ -1202,7 +1213,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
-git checkout --quiet -b "$BRANCH"
+# 失敗を見逃すと、ユーザーの実ブランチ上で git apply と git commit が行われる。
+if ! git checkout --quiet -b "$BRANCH"; then
+  printf 'エラー: 検証ブランチ %s を作成できませんでした\n' "$BRANCH" >&2
+  exit 2
+fi
 
 if ! git apply --index "$CASE_DIR/case.patch" 2>"$LOGS/apply.log"; then
   printf 'エラー: パッチが適用できません。case.patch の更新が必要です\n' >&2
@@ -1709,18 +1724,20 @@ git commit -m "fix: ツール起動確認と対照実行を追加し RESULTS.md 
 
 - [ ] **Step 1: `L1-03-floating-promise` のパッチを作る**
 
-`await` 忘れを入れる。`apps/api/src/orders/orders.service.ts` の `findByUser` で `await` を落とす。
+`await` 忘れを入れる。`apps/api/src/orders/orders.service.ts` の `create` に、戻り値を使わない非同期呼び出しを `await` 無しで 1 文足す。
 
 ```ts
-  async findByUser(userId: string): Promise<OrderResponseDto[]> {
-    const orders = this.prisma.order.findMany({
+    // 注文作成のたびに会員状態を確認する（await 忘れ）
+    this.prisma.user.findUnique({ where: { id: userId } });
 ```
 
-`await` を消すと `orders` が Promise になり、`orders.map` が型エラーになる。**つまり typecheck でも止まる。** それを含めて記録する。
+挿入位置は `create` の `const order = await this.prisma.order.create({...});` の直後、`return toOrderResponse(order);` の直前である。
+
+**既存の `await` を削って型エラーにする形にしてはいけない。** それだと止めるのは型チェックであって、手順書 §2.4 が主張する `no-floating-promises` は発火しない。実測で確認済み: `findByUser` の `await` を落とすと `require-await` と `no-unsafe-return` / `no-unsafe-call` が出るだけで `no-floating-promises` は出ない（`const` に束縛され `orders.map` で消費されるので floating ではない）。上記の形なら **`no-floating-promises` だけが発火し、typecheck は通る**（実測済み）。手順書の主張を試すのが目的なので、この形にする。
 
 ```bash
 mkdir -p verification/cases/L1-03-floating-promise
-# apps/api/src/orders/orders.service.ts の findByUser から await を削除
+# apps/api/src/orders/orders.service.ts の create に上記 2 行を追加
 git diff > verification/cases/L1-03-floating-promise/case.patch
 git checkout -- .
 ```
@@ -1733,9 +1750,11 @@ pitfall: await 忘れで Promise を放置する
 claimed_layer: L1
 expect:
   l2-install: pass
-  l1-typecheck: fail
+  l1-typecheck: pass
   l1-lint: fail
 ```
+
+`l1-typecheck: pass` としているのは、放置された Promise は型としては正しいためである。**これを止めるのは lint（`no-floating-promises`）だけ**という切り分けが、このケースの検証内容である。
 
 - [ ] **Step 3: ケースを実行して判定を確認**
 
