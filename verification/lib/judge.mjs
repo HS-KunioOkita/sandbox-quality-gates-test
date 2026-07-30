@@ -46,6 +46,23 @@ export function parseExpect(path) {
     else throw new Error(`expect.yml の未知のキーです: ${key}`);
   }
 
+  // 値の妥当性を検査する。構造が正しくても中身が不正だと判定が静かに壊れる:
+  // claimed_layer が空や小文字だと blockingLayers に一致しえず claimVerdict が恒に
+  // mismatch になり、expect が空だと mismatches が空になって configVerdict が恒に
+  // match になる。どちらも「ハーネスが何も検証していないのに結果が出る」状態なので、
+  // 黙って通さず throw する。throw すれば run-all.sh が「⚠️ 実行不能」行を出す。
+  if (!/^L[1-5]$/.test(parsed.claimedLayer)) {
+    throw new Error(`expect.yml の claimed_layer が不正です: ${parsed.claimedLayer}`);
+  }
+  if (Object.keys(parsed.expect).length === 0) {
+    throw new Error('expect.yml の expect が空です');
+  }
+  for (const [gate, value] of Object.entries(parsed.expect)) {
+    if (value !== 'pass' && value !== 'fail') {
+      throw new Error(`expect.yml の expect.${gate} は pass か fail のみです: ${value}`);
+    }
+  }
+
   return parsed;
 }
 

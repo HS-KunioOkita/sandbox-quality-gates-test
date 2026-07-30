@@ -6,11 +6,11 @@
 # 手順:
 #   1. 作業ツリーがクリーンか確認（汚れていたら中断）
 #   2. 検証ブランチの残存を確認（あれば中断）
-#   3. main から verify/<CASE-ID> ブランチを切る
+#   3. 現在のブランチから verify/<CASE-ID> ブランチを切る
 #   4. case.patch を適用してコミット
 #   5. l2-install.sh を先に実行。失敗したら後続を打ち切る
 #   6. 残りのゲートを実行し、結果を /tmp に記録
-#   7. main に戻り検証ブランチを削除
+#   7. 元のブランチに戻り検証ブランチを削除。戻れなかったら中断する
 #   8. judge.mjs で期待と突き合わせ、TSV 1 行を標準出力へ
 #
 # 結果を /tmp に書いてから main に戻るのが要点。検証ブランチ上で
@@ -66,7 +66,10 @@ if ! git apply --index "$CASE_DIR/case.patch" 2>"$LOGS/apply.log"; then
   cat "$LOGS/apply.log" >&2
   exit 2
 fi
-git commit --quiet -m "verify: $CASE_ID"
+if ! git commit --quiet -m "verify: $CASE_ID"; then
+  printf 'エラー: 検証コミットに失敗しました\n' >&2
+  exit 2
+fi
 
 # ゲートを実行する。l2-install は必ず先。依存が無ければ他が動かないため、
 # また install 失敗による連鎖失敗を「ゲートが欠陥を検出した」と誤記録しないため。
@@ -89,6 +92,19 @@ else
 fi
 
 cleanup
+
+# cleanup が本当に成功したかを検査する。cleanup 内の git は両方 || true で
+# 握り潰しているため、失敗しても何も起きない。ゲートが追跡ファイルを汚すと
+# checkout が失敗し、続く branch -D も「チェックアウト中のブランチは消せない」
+# ため必ず失敗する。それを見逃すと、欠陥パッチ適用済みの検証ブランチ上で
+# judge が走り、正常な JSON を出して exit 0 してしまう。
+if [ "$(git rev-parse --abbrev-ref HEAD)" != "$BASE_BRANCH" ] \
+  || git show-ref --quiet "refs/heads/$BRANCH"; then
+  printf 'エラー: %s への復帰に失敗しました。手動で復旧してください\n' "$BASE_BRANCH" >&2
+  printf '  復旧: git checkout -f %s && git branch -D %s\n' "$BASE_BRANCH" "$BRANCH" >&2
+  git status --short >&2
+  exit 2
+fi
 trap - EXIT
 
 node verification/lib/judge.mjs "$CASE_DIR/expect.yml" "$ACTUAL"

@@ -39,6 +39,27 @@ test('parseExpect はコメント行と空行を無視する', () => {
   assert.deepEqual(parsed.expect, { 'l1-lint': 'fail' });
 });
 
+// 以下 3 件は「構造は正しいが中身が不正」なケース。黙って通ると判定が
+// 恒真／恒偽になり、ハーネスが何も検証しなくなる。
+test('parseExpect は claimed_layer が L1〜L5 でなければ throw する', () => {
+  const lower = `id: X\npitfall: p\nclaimed_layer: l1\nexpect:\n  l1-lint: fail\n`;
+  assert.throws(() => parseExpect(writeTemp('expect.yml', lower)), /claimed_layer が不正/);
+  const missing = `id: X\npitfall: p\nexpect:\n  l1-lint: fail\n`;
+  assert.throws(() => parseExpect(writeTemp('expect.yml', missing)), /claimed_layer が不正/);
+});
+
+test('parseExpect は expect が空なら throw する', () => {
+  const empty = `id: X\npitfall: p\nclaimed_layer: L1\nexpect:\n`;
+  assert.throws(() => parseExpect(writeTemp('expect.yml', empty)), /expect が空/);
+});
+
+test('parseExpect は expect の値が pass/fail 以外なら throw する', () => {
+  const quoted = `id: X\npitfall: p\nclaimed_layer: L1\nexpect:\n  l1-lint: "fail"\n`;
+  assert.throws(() => parseExpect(writeTemp('expect.yml', quoted)), /pass か fail のみ/);
+  const typo = `id: X\npitfall: p\nclaimed_layer: L1\nexpect:\n  l1-lint: faill\n`;
+  assert.throws(() => parseExpect(writeTemp('expect.yml', typo)), /pass か fail のみ/);
+});
+
 test('parseActual は TSV を読める', () => {
   const tsv = 'l2-install\t0\tok\nl1-typecheck\t0\tok\nl1-lint\t1\t3 problems\n';
   assert.deepEqual(parseActual(writeTemp('actual.tsv', tsv)), {
