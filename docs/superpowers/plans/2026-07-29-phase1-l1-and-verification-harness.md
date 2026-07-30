@@ -484,11 +484,15 @@ check 'l1-typecheck はクリーンなツリーで pass' 0 "$?"
 check 'l1-lint はクリーンなツリーで pass' 0 "$?"
 
 # --- 必要なコマンドが無いときは error(2) ---
-# PATH を潰して pnpm を見つけられない状態を作る
-( PATH=/nonexistent ./scripts/gates/l1-lint.sh ) >/dev/null 2>&1
+# PATH から pnpm を外す。pnpm は volta / homebrew などルート外に入るので
+# /usr/bin:/bin に絞れば消える。一方 env と bash はここに居るので、
+# スクリプト自体は起動できて gate_require_cmd まで到達する。
+# PATH=/nonexistent は使えない。`#!/usr/bin/env bash` の bash 解決ごと壊れ、
+# ゲートが起動する前にシェルが 127 で落ちるため、ゲートの正規化を検証できない。
+( PATH=/usr/bin:/bin ./scripts/gates/l1-lint.sh ) >/dev/null 2>&1
 check 'l1-lint は pnpm が無いとき error' 2 "$?"
 
-( PATH=/nonexistent ./scripts/gates/l1-typecheck.sh ) >/dev/null 2>&1
+( PATH=/usr/bin:/bin ./scripts/gates/l1-typecheck.sh ) >/dev/null 2>&1
 check 'l1-typecheck は pnpm が無いとき error' 2 "$?"
 
 # --- どのカレントディレクトリからでも動く ---
