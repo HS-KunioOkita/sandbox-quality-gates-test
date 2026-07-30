@@ -13,7 +13,7 @@ source scripts/gates/_lib.sh
 
 gate_require_repo
 gate_require_cmd pnpm
-gate_require_pnpm_tool eslint --version
+gate_require_runnable eslint pnpm exec eslint --version
 
 pnpm exec eslint . --max-warnings=0
 # ESLint: 1 = lint エラーまたは警告数超過（fail）、2 = 設定エラー（error）

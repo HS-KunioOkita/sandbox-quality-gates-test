@@ -23,6 +23,6 @@ if [ "$raw" -ne 0 ]; then
   gate_finish "$raw" 1
 fi
 
-gate_require_pnpm_tool prisma --version
+gate_require_runnable prisma pnpm --filter api exec prisma --version
 pnpm --filter api exec prisma generate
 gate_finish "$?" 1

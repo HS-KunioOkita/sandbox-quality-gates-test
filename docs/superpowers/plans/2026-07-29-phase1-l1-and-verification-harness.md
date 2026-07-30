@@ -438,7 +438,7 @@ git commit -m "feat: apps/api と apps/web の ESLint 設定を追加し既存�
   - `_lib.sh` が提供する関数:
     - `gate_require_repo` — git リポジトリの中でなければ exit 2（移動はしない）
     - `gate_require_cmd <コマンド名>` — 無ければ exit 2
-    - `gate_require_pnpm_tool <ツール名> <確認用引数...>` — `pnpm exec` 経由で起動できなければ exit 2
+    - `gate_require_runnable <表示名> <コマンド...>` — 起動できなければ exit 2。ガード対象と同じスコープで呼ぶこと
     - `gate_finish <生 exit code> <fail とみなす code のリスト>` — 正規化して exit する
   - **ゲートスクリプトはどのカレントディレクトリから呼んでも動く。** 各スクリプトが冒頭で自分の位置を起点にリポジトリルートへ移動するため。ハーネスも CI もこれに依存する
   - 全ゲートスクリプトの冒頭は次の定型で始まる。`_lib.sh` を相対パスで source するため、**`cd` が source より先でなければならない**
@@ -565,14 +565,22 @@ gate_require_repo() {
   fi
 }
 
-# pnpm exec 経由で使うツールが起動できることを確認する。起動できなければ error で終了する。
+# 指定したコマンドが起動できることを確認する。起動できなければ error で終了する。
+# 第 1 引数は表示用の名前、残りが実際に実行するコマンド。
 #
 # pnpm exec は対象バイナリが見つからないとき pnpm 自身が 1 を返す。その 1 をそのまま
 # gate_finish に渡すと「ツールが実行できなかった」が「欠陥を検出した」と記録される。
 # node_modules が壊れている状態を「lint 違反あり」と読み違えるのが、この関数が防ぐ事故である。
-gate_require_pnpm_tool() {
-  if ! pnpm exec "$@" >/dev/null 2>&1; then
-    printf 'gate error: %s を実行できません（pnpm install が必要かもしれません）\n' "$1" >&2
+#
+# **ガード対象と同じスコープで呼ぶこと。** pnpm のフィルタは exec より前に置く必要があり
+# （`pnpm --filter api exec prisma` は動くが `pnpm exec --filter api prisma` は動かない）、
+# スコープがずれるとツールが有るのに「無い」と判定して常に error になる。実測: フィルタ無しの
+# `pnpm exec prisma --version` は 1、`pnpm --filter api exec prisma --version` は 0。
+gate_require_runnable() {
+  local label="$1"
+  shift
+  if ! "$@" >/dev/null 2>&1; then
+    printf 'gate error: %s を実行できません（pnpm install が必要かもしれません）\n' "$label" >&2
     exit "$GATE_ERROR"
   fi
 }
@@ -643,7 +651,7 @@ source scripts/gates/_lib.sh
 
 gate_require_repo
 gate_require_cmd pnpm
-gate_require_pnpm_tool eslint --version
+gate_require_runnable eslint pnpm exec eslint --version
 
 pnpm exec eslint . --max-warnings=0
 # ESLint: 1 = lint エラーまたは警告数超過（fail）、2 = 設定エラー（error）
@@ -682,7 +690,7 @@ if [ "$raw" -ne 0 ]; then
   gate_finish "$raw" 1
 fi
 
-gate_require_pnpm_tool prisma --version
+gate_require_runnable prisma pnpm --filter api exec prisma --version
 pnpm --filter api exec prisma generate
 gate_finish "$?" 1
 ```
@@ -1562,7 +1570,7 @@ git commit -m "feat: L1 検証ケース 3 本（any / 添字アクセス / eslin
 ## Task 6: 残り 3 ケースと全件実行
 
 **Files:**
-- Modify: `scripts/gates/_lib.sh`（`gate_require_pnpm_tool` を追加）
+- Modify: `scripts/gates/_lib.sh`（`gate_require_runnable` を追加）
 - Modify: `scripts/gates/l1-lint.sh`、`scripts/gates/l2-install.sh`（ツール起動確認を追加）
 - Modify: `verification/run-all.sh`（対照実行・限界の明記・`nullglob`）
 - Create: `verification/cases/L1-03-floating-promise/{case.patch, expect.yml}`
@@ -1584,14 +1592,22 @@ Task 5 のレビューが、ケースそのものではなくハーネス側に 
 `scripts/gates/_lib.sh` の `gate_finish` の定義の直前に次を挿入する。
 
 ```bash
-# pnpm exec 経由で使うツールが起動できることを確認する。起動できなければ error で終了する。
+# 指定したコマンドが起動できることを確認する。起動できなければ error で終了する。
+# 第 1 引数は表示用の名前、残りが実際に実行するコマンド。
 #
 # pnpm exec は対象バイナリが見つからないとき pnpm 自身が 1 を返す。その 1 をそのまま
 # gate_finish に渡すと「ツールが実行できなかった」が「欠陥を検出した」と記録される。
 # node_modules が壊れている状態を「lint 違反あり」と読み違えるのが、この関数が防ぐ事故である。
-gate_require_pnpm_tool() {
-  if ! pnpm exec "$@" >/dev/null 2>&1; then
-    printf 'gate error: %s を実行できません（pnpm install が必要かもしれません）\n' "$1" >&2
+#
+# **ガード対象と同じスコープで呼ぶこと。** pnpm のフィルタは exec より前に置く必要があり
+# （`pnpm --filter api exec prisma` は動くが `pnpm exec --filter api prisma` は動かない）、
+# スコープがずれるとツールが有るのに「無い」と判定して常に error になる。実測: フィルタ無しの
+# `pnpm exec prisma --version` は 1、`pnpm --filter api exec prisma --version` は 0。
+gate_require_runnable() {
+  local label="$1"
+  shift
+  if ! "$@" >/dev/null 2>&1; then
+    printf 'gate error: %s を実行できません（pnpm install が必要かもしれません）\n' "$label" >&2
     exit "$GATE_ERROR"
   fi
 }
@@ -1600,13 +1616,13 @@ gate_require_pnpm_tool() {
 `scripts/gates/l1-lint.sh` の `gate_require_cmd pnpm` の直後に 1 行足す。
 
 ```bash
-gate_require_pnpm_tool eslint --version
+gate_require_runnable eslint pnpm exec eslint --version
 ```
 
 `scripts/gates/l2-install.sh` の `pnpm --filter api exec prisma generate` の直前に 1 行足す。
 
 ```bash
-gate_require_pnpm_tool prisma --version
+gate_require_runnable prisma pnpm --filter api exec prisma --version
 ```
 
 `l1-typecheck.sh` は turbo 経由なので対象外である（turbo 自身の異常は 1 で、すでに error 側に写像されている）。
@@ -1676,7 +1692,7 @@ bash -n verification/run-all.sh && echo "run-all.sh 構文 OK"
 
 Expected: ゲートのテスト 6 件成功、`LINT=0`、構文 OK。
 
-`gate_require_pnpm_tool` の error 経路は `gates.test.sh` では試さない（`node_modules` を壊す必要があり、副作用が大きすぎる）。**これは Task 3 の fail 経路と同じ穴である**ことを自覚しておく。
+`gate_require_runnable` の error 経路は `gates.test.sh` では試さない（`node_modules` を壊す必要があり、副作用が大きすぎる）。**これは Task 3 の fail 経路と同じ穴である**ことを自覚しておく。
 
 - [ ] **Step 0c: コミット**
 

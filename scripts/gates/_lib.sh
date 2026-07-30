@@ -32,14 +32,22 @@ gate_require_repo() {
   fi
 }
 
-# pnpm exec 経由で使うツールが起動できることを確認する。起動できなければ error で終了する。
+# 指定したコマンドが起動できることを確認する。起動できなければ error で終了する。
+# 第 1 引数は表示用の名前、残りが実際に実行するコマンド。
 #
 # pnpm exec は対象バイナリが見つからないとき pnpm 自身が 1 を返す。その 1 をそのまま
 # gate_finish に渡すと「ツールが実行できなかった」が「欠陥を検出した」と記録される。
 # node_modules が壊れている状態を「lint 違反あり」と読み違えるのが、この関数が防ぐ事故である。
-gate_require_pnpm_tool() {
-  if ! pnpm exec "$@" >/dev/null 2>&1; then
-    printf 'gate error: %s を実行できません（pnpm install が必要かもしれません）\n' "$1" >&2
+#
+# **ガード対象と同じスコープで呼ぶこと。** pnpm のフィルタは exec より前に置く必要があり
+# （`pnpm --filter api exec prisma` は動くが `pnpm exec --filter api prisma` は動かない）、
+# スコープがずれるとツールが有るのに「無い」と判定して常に error になる。実測: フィルタ無しの
+# `pnpm exec prisma --version` は 1、`pnpm --filter api exec prisma --version` は 0。
+gate_require_runnable() {
+  local label="$1"
+  shift
+  if ! "$@" >/dev/null 2>&1; then
+    printf 'gate error: %s を実行できません（pnpm install が必要かもしれません）\n' "$label" >&2
     exit "$GATE_ERROR"
   fi
 }
