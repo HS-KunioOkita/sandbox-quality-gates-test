@@ -1279,6 +1279,7 @@ for gate in l2-install l1-typecheck l1-lint; do
     printf 'エラー: baseline で %s が pass しませんでした（exit %s）\n' "$gate" "$baseline_code" >&2
     printf '  パッチを当てていない状態でゲートが赤いので、ケースの判定は意味を持ちません。\n' >&2
     printf '  先にリポジトリを緑にしてください。\n' >&2
+    printf '  完全なログ: %s\n' "$WORK/baseline-$gate.log" >&2
     tail -n 20 "$WORK/baseline-$gate.log" >&2
     exit 2
   fi
@@ -1291,7 +1292,9 @@ done
   printf '一致すれば手順書が正しく、ズレれば手順書への修正提案になる。\n\n'
   printf '## この表が保証していること・していないこと\n\n'
   printf '生成前に対照実行（パッチ無しで全ゲートが pass すること）を確認している。\n'
-  printf 'したがって各行は「パッチを当てたら、主張どおりの層のゲートが赤くなった」を意味する。\n\n'
+  printf 'したがって ✅ の行は「パッチを当てたら、主張どおりの層のゲートが赤くなった」を意味する。\n'
+  printf '❌ と ⚠️ の行はそうならなかったことを意味し、原因の分析は\n'
+  printf '`docs/superpowers/phase0-findings.md` の「手順書への修正提案候補」に書く。\n\n'
   printf '一方、次は保証していない。読むときに補って解釈すること。\n\n'
   printf '- **どのルールが落としたかは見ていない。** 「実際に止めた層」の列はゲート単位であり、\n'
   printf '  意図したルールが発火したのか、パッチが誘発した別の違反で落ちたのかを区別しない。\n'
@@ -1646,6 +1649,7 @@ for gate in l2-install l1-typecheck l1-lint; do
     printf 'エラー: baseline で %s が pass しませんでした（exit %s）\n' "$gate" "$baseline_code" >&2
     printf '  パッチを当てていない状態でゲートが赤いので、ケースの判定は意味を持ちません。\n' >&2
     printf '  先にリポジトリを緑にしてください。\n' >&2
+    printf '  完全なログ: %s\n' "$WORK/baseline-$gate.log" >&2
     tail -n 20 "$WORK/baseline-$gate.log" >&2
     exit 2
   fi
@@ -1664,7 +1668,9 @@ done
   printf '一致すれば手順書が正しく、ズレれば手順書への修正提案になる。\n\n'
   printf '## この表が保証していること・していないこと\n\n'
   printf '生成前に対照実行（パッチ無しで全ゲートが pass すること）を確認している。\n'
-  printf 'したがって各行は「パッチを当てたら、主張どおりの層のゲートが赤くなった」を意味する。\n\n'
+  printf 'したがって ✅ の行は「パッチを当てたら、主張どおりの層のゲートが赤くなった」を意味する。\n'
+  printf '❌ と ⚠️ の行はそうならなかったことを意味し、原因の分析は\n'
+  printf '`docs/superpowers/phase0-findings.md` の「手順書への修正提案候補」に書く。\n\n'
   printf '一方、次は保証していない。読むときに補って解釈すること。\n\n'
   printf -- '- **どのルールが落としたかは見ていない。** 「実際に止めた層」の列はゲート単位であり、\n'
   printf '  意図したルールが発火したのか、パッチが誘発した別の違反で落ちたのかを区別しない。\n'

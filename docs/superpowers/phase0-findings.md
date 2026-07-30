@@ -112,6 +112,30 @@ Phase 0 では検証ノイズを避けるため Prisma 6.19.3（`prisma-client-j
 
 **手順書への提案**：§2.4 のルール一覧から `no-unused-disable` を削除する。`linterOptions.reportUnusedDisableDirectives: 'error'` は残す（ESLint 10 の既定は `warn` なので、`--max-warnings=0` を付けない実行では見逃すため意味がある）。
 
+### 1.9 §2.4 の `no-restricted-imports` は相対パスの越境 import を検出できない（検証ケース L1-06 の結論）
+
+Phase 1 の検証ケース 6 本のうち唯一、**手順書の主張どおりに止まらなかった**ケースである（`verification/RESULTS.md` の `L1-06-web-imports-api` 行）。
+
+手順書 §10 は「Web から API の内部実装を直接 import する」を L1 が捕まえる落とし穴として挙げ、§2.4 は `no-restricted-imports` の `patterns` でこれを禁じる構成を示している。実測すると、この構成は相対パスでの越境 import を**まったく検出しない**。
+
+```ts
+// apps/web/src/features/orders/orderTotal.ts
+import { applyDiscount } from '../../../../api/src/discount/discount';
+```
+
+このパスは `apps/api/src/discount/discount` に解決される。`patterns: [{ group: ['**/apps/api/src/**'] }]` を設定していても lint は通る。
+
+| import の書き方 | `no-restricted-imports` |
+|---|---|
+| `'../../../../api/src/discount/discount'` | 発火しない |
+| `'@repo/../apps/api/src/discount/discount'` | 発火する |
+
+**原因**：`no-restricted-imports` の `patterns` は**解決後のパスではなく、ソースに書かれた import 指定子の文字列**に対する glob マッチである。相対パスの文字列には `apps/api` が現れないため、どんな `group` を書いても一致しない。
+
+型チェックも止めない。`apps/web/tsconfig.json` の `include` は `src/**` だけだが、**`include` は起点ファイルを絞るだけで、import 経由で到達したファイルを型チェックから免除しない**。`discount.ts` 自体に型エラーが無いため `tsc` は成功する。
+
+**手順書への提案**：§2.4 の依存境界の強制を `no-restricted-imports` に頼らない。解決後のパスで判定する `eslint-plugin-import` の `import/no-restricted-paths` に置き換えるか、併用する。`no-restricted-imports` を残す場合は「パッケージ名での import しか止められない」という限界を明記する。
+
 ---
 
 ## 2. 検証ケースの期待値に対する申し送り
