@@ -807,6 +807,27 @@ test('parseExpect はコメント行と空行を無視する', () => {
   assert.deepEqual(parsed.expect, { 'l1-lint': 'fail' });
 });
 
+// 以下 3 件は「構造は正しいが中身が不正」なケース。黙って通ると判定が
+// 恒真／恒偽になり、ハーネスが何も検証しなくなる。
+test('parseExpect は claimed_layer が L1〜L5 でなければ throw する', () => {
+  const lower = `id: X\npitfall: p\nclaimed_layer: l1\nexpect:\n  l1-lint: fail\n`;
+  assert.throws(() => parseExpect(writeTemp('expect.yml', lower)), /claimed_layer が不正/);
+  const missing = `id: X\npitfall: p\nexpect:\n  l1-lint: fail\n`;
+  assert.throws(() => parseExpect(writeTemp('expect.yml', missing)), /claimed_layer が不正/);
+});
+
+test('parseExpect は expect が空なら throw する', () => {
+  const empty = `id: X\npitfall: p\nclaimed_layer: L1\nexpect:\n`;
+  assert.throws(() => parseExpect(writeTemp('expect.yml', empty)), /expect が空/);
+});
+
+test('parseExpect は expect の値が pass/fail 以外なら throw する', () => {
+  const quoted = `id: X\npitfall: p\nclaimed_layer: L1\nexpect:\n  l1-lint: "fail"\n`;
+  assert.throws(() => parseExpect(writeTemp('expect.yml', quoted)), /pass か fail のみ/);
+  const typo = `id: X\npitfall: p\nclaimed_layer: L1\nexpect:\n  l1-lint: faill\n`;
+  assert.throws(() => parseExpect(writeTemp('expect.yml', typo)), /pass か fail のみ/);
+});
+
 test('parseActual は TSV を読める', () => {
   const tsv = 'l2-install\t0\tok\nl1-typecheck\t0\tok\nl1-lint\t1\t3 problems\n';
   assert.deepEqual(parseActual(writeTemp('actual.tsv', tsv)), {
@@ -934,6 +955,23 @@ export function parseExpect(path) {
     else if (key === 'pitfall') parsed.pitfall = value.trim();
     else if (key === 'claimed_layer') parsed.claimedLayer = value.trim();
     else throw new Error(`expect.yml の未知のキーです: ${key}`);
+  }
+
+  // 値の妥当性を検査する。構造が正しくても中身が不正だと判定が静かに壊れる:
+  // claimed_layer が空や小文字だと blockingLayers に一致しえず claimVerdict が恒に
+  // mismatch になり、expect が空だと mismatches が空になって configVerdict が恒に
+  // match になる。どちらも「ハーネスが何も検証していないのに結果が出る」状態なので、
+  // 黙って通さず throw する。throw すれば run-all.sh が「⚠️ 実行不能」行を出す。
+  if (!/^L[1-5]$/.test(parsed.claimedLayer)) {
+    throw new Error(`expect.yml の claimed_layer が不正です: ${parsed.claimedLayer}`);
+  }
+  if (Object.keys(parsed.expect).length === 0) {
+    throw new Error('expect.yml の expect が空です');
+  }
+  for (const [gate, value] of Object.entries(parsed.expect)) {
+    if (value !== 'pass' && value !== 'fail') {
+      throw new Error(`expect.yml の expect.${gate} は pass か fail のみです: ${value}`);
+    }
   }
 
   return parsed;
@@ -1082,11 +1120,11 @@ Expected: `EXIT=0`。違反が出た場合は `judge.mjs` / `judge.test.mjs` を
 # 手順:
 #   1. 作業ツリーがクリーンか確認（汚れていたら中断）
 #   2. 検証ブランチの残存を確認（あれば中断）
-#   3. main から verify/<CASE-ID> ブランチを切る
+#   3. 現在のブランチから verify/<CASE-ID> ブランチを切る
 #   4. case.patch を適用してコミット
 #   5. l2-install.sh を先に実行。失敗したら後続を打ち切る
 #   6. 残りのゲートを実行し、結果を /tmp に記録
-#   7. main に戻り検証ブランチを削除
+#   7. 元のブランチに戻り検証ブランチを削除。戻れなかったら中断する
 #   8. judge.mjs で期待と突き合わせ、TSV 1 行を標準出力へ
 #
 # 結果を /tmp に書いてから main に戻るのが要点。検証ブランチ上で
@@ -1142,7 +1180,10 @@ if ! git apply --index "$CASE_DIR/case.patch" 2>"$LOGS/apply.log"; then
   cat "$LOGS/apply.log" >&2
   exit 2
 fi
-git commit --quiet -m "verify: $CASE_ID"
+if ! git commit --quiet -m "verify: $CASE_ID"; then
+  printf 'エラー: 検証コミットに失敗しました\n' >&2
+  exit 2
+fi
 
 # ゲートを実行する。l2-install は必ず先。依存が無ければ他が動かないため、
 # また install 失敗による連鎖失敗を「ゲートが欠陥を検出した」と誤記録しないため。
@@ -1165,6 +1206,19 @@ else
 fi
 
 cleanup
+
+# cleanup が本当に成功したかを検査する。cleanup 内の git は両方 || true で
+# 握り潰しているため、失敗しても何も起きない。ゲートが追跡ファイルを汚すと
+# checkout が失敗し、続く branch -D も「チェックアウト中のブランチは消せない」
+# ため必ず失敗する。それを見逃すと、欠陥パッチ適用済みの検証ブランチ上で
+# judge が走り、正常な JSON を出して exit 0 してしまう。
+if [ "$(git rev-parse --abbrev-ref HEAD)" != "$BASE_BRANCH" ] \
+  || git show-ref --quiet "refs/heads/$BRANCH"; then
+  printf 'エラー: %s への復帰に失敗しました。手動で復旧してください\n' "$BASE_BRANCH" >&2
+  printf '  復旧: git checkout -f %s && git branch -D %s\n' "$BASE_BRANCH" "$BRANCH" >&2
+  git status --short >&2
+  exit 2
+fi
 trap - EXIT
 
 node verification/lib/judge.mjs "$CASE_DIR/expect.yml" "$ACTUAL"
@@ -1253,7 +1307,7 @@ node --test verification/lib/judge.test.mjs 2>&1 | tail -3
 ./scripts/gates/gates.test.sh | tail -2
 ```
 
-Expected: `LINT=0`、judge のテスト 9 件成功、ゲートのテスト 6 件成功。
+Expected: `LINT=0`、judge のテスト 12 件成功、ゲートのテスト 6 件成功。
 
 - [ ] **Step 12: コミット**
 
@@ -1678,7 +1732,7 @@ git commit -m "feat: L1 検証ケース 6 本を揃え RESULTS.md を生成"
 - [ ] `pnpm turbo typecheck` が成功（L1 typecheck が緑）
 - [ ] `pnpm turbo build typecheck test` が 9 タスク・23 テスト成功（既存機能を壊していない）
 - [ ] `./scripts/gates/gates.test.sh` が 6 件成功（exit code 契約が守られている）
-- [ ] `node --test verification/lib/judge.test.mjs` が 9 件成功（判定ロジックが正しい）
+- [ ] `node --test verification/lib/judge.test.mjs` が 12 件成功（判定ロジックが正しい）
 - [ ] `verification/RESULTS.md` に L1 系 6 ケースの判定が入っている
 - [ ] `./verification/run-all.sh` の実行後、作業ツリーがクリーンで `verify/*` ブランチが残っていない
 - [ ] 仮説 6・7 に結論が出て `docs/superpowers/phase0-findings.md` に記録されている
