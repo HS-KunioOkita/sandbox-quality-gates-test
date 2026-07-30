@@ -42,6 +42,26 @@ docker compose exec -T postgres psql -U postgres -d quality_gates -t -A \
 
 ## 検証
 
+アプリのビルド・型チェック・テスト:
+
 ```bash
 pnpm turbo build typecheck test
 ```
+
+品質ゲート（L1）:
+
+```bash
+pnpm lint                        # eslint . --max-warnings=0
+./scripts/gates/gates.test.sh    # ゲートの exit code 契約を検証
+```
+
+手順書の主張に対する検証（意図的な欠陥を注入してゲートに当てる）:
+
+```bash
+./verification/run-case.sh <CASE-ID>   # 1 ケース（1〜3 分）
+./verification/run-all.sh              # 全ケース + 対照実行（15〜25 分）
+```
+
+`run-all.sh` は `verification/RESULTS.md` を生成する。作業ツリーがクリーンでないと中断するので、ケースを追加したらコミットしてから実行すること。実行後は `RESULTS.md` の差分をコミットするか `git checkout` で戻す。
+
+検証結果と手順書への修正提案は [`docs/superpowers/phase0-findings.md`](docs/superpowers/phase0-findings.md) にまとめてある。
