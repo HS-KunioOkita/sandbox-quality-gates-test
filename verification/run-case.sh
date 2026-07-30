@@ -48,6 +48,15 @@ if git show-ref --quiet "refs/heads/$BRANCH"; then
 fi
 
 BASE_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+# detached HEAD だと BASE_BRANCH が文字列 HEAD になる。すると cleanup の
+# `git checkout HEAD` は「今のコミットで detach する」＝欠陥コミットに留まる動作になり、
+# branch -D も成功し、事後ガードの HEAD != BASE_BRANCH も HEAD != HEAD で偽になって
+# すべてすり抜ける。ユーザーは欠陥コミット上に置き去りにされ、git status はクリーンなので
+# 気づけない。入口で弾く。
+if [ "$BASE_BRANCH" = "HEAD" ]; then
+  printf 'エラー: detached HEAD では実行できません。ブランチをチェックアウトしてください\n' >&2
+  exit 2
+fi
 WORK=$(mktemp -d)
 ACTUAL="$WORK/actual.tsv"
 LOGS="$WORK/logs"
@@ -59,7 +68,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
-git checkout --quiet -b "$BRANCH"
+# 失敗を見逃すと、ユーザーの実ブランチ上で git apply と git commit が行われる。
+if ! git checkout --quiet -b "$BRANCH"; then
+  printf 'エラー: 検証ブランチ %s を作成できませんでした\n' "$BRANCH" >&2
+  exit 2
+fi
 
 if ! git apply --index "$CASE_DIR/case.patch" 2>"$LOGS/apply.log"; then
   printf 'エラー: パッチが適用できません。case.patch の更新が必要です\n' >&2
