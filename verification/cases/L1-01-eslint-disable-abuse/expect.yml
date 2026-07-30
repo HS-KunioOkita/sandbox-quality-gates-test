@@ -1,0 +1,7 @@
+id: L1-01-eslint-disable-abuse
+pitfall: eslint-disable でファイル全体を黙らせる
+claimed_layer: L1
+expect:
+  l2-install: pass
+  l1-typecheck: pass
+  l1-lint: fail

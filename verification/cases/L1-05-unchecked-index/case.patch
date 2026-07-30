@@ -1,0 +1,13 @@
+diff --git a/apps/web/src/features/orders/orderTotal.ts b/apps/web/src/features/orders/orderTotal.ts
+index 957a902..0ff324a 100644
+--- a/apps/web/src/features/orders/orderTotal.ts
++++ b/apps/web/src/features/orders/orderTotal.ts
+@@ -9,3 +9,8 @@ export function sumDiscountedTotal(orders: readonly OrderView[]): number {
+ export function isDiscountApplied(order: OrderView): boolean {
+   return order.discountedTotal < order.unitPrice * order.quantity;
+ }
++
++/** 先頭の注文の商品名を返す */
++export function firstProductName(orders: readonly OrderView[]): string {
++  return orders[0].productName;
++}

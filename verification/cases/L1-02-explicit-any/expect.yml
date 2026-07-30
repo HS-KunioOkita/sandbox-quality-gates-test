@@ -1,0 +1,7 @@
+id: L1-02-explicit-any
+pitfall: any で型チェックを回避する
+claimed_layer: L1
+expect:
+  l2-install: pass
+  l1-typecheck: pass
+  l1-lint: fail

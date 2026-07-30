@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# 全検証ケースを実行し verification/RESULTS.md を生成する。
+set -uo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+RESULTS=verification/RESULTS.md
+WORK=$(mktemp -d)
+
+# 対照実行。パッチを当てない状態で全ゲートが pass することを先に確かめる。
+#
+# これが崩れていると、パッチが何もしていなくても全ケースが「主張どおりの層が止めた」に
+# なり、表が全部 ✅ で埋まる。たとえば main 側に lint エラーが 1 つ混入するだけで、
+# 全ケースが blockedBy: [l1-lint] で match を返す。ケースの判定は、この対照が
+# 取れていることの上でしか意味を持たない。
+printf '=== baseline（パッチ無し） ===\n' >&2
+for gate in l2-install l1-typecheck l1-lint; do
+  "./scripts/gates/$gate.sh" >"$WORK/baseline-$gate.log" 2>&1
+  baseline_code=$?
+  if [ "$baseline_code" -ne 0 ]; then
+    printf 'エラー: baseline で %s が pass しませんでした（exit %s）\n' "$gate" "$baseline_code" >&2
+    printf '  パッチを当てていない状態でゲートが赤いので、ケースの判定は意味を持ちません。\n' >&2
+    printf '  先にリポジトリを緑にしてください。\n' >&2
+    printf '  完全なログ: %s\n' "$WORK/baseline-$gate.log" >&2
+    tail -n 20 "$WORK/baseline-$gate.log" >&2
+    exit 2
+  fi
+done
+
+{
+  printf '# 検証結果マトリクス\n\n'
+  printf '`verification/run-all.sh` が生成する。手で編集しない。\n\n'
+  printf '「手順書の主張」と「実際に止めた層」を並べるのがこの表の眼目である。\n'
+  printf '一致すれば手順書が正しく、ズレれば手順書への修正提案になる。\n\n'
+  printf '## この表が保証していること・していないこと\n\n'
+  printf '生成前に対照実行（パッチ無しで全ゲートが pass すること）を確認している。\n'
+  printf 'したがって ✅ の行は「パッチを当てたら、主張どおりの層のゲートが赤くなった」を意味する。\n'
+  printf '❌ と ⚠️ の行はそうならなかったことを意味し、原因の分析は\n'
+  printf '`docs/superpowers/phase0-findings.md` の「手順書への修正提案候補」に書く。\n\n'
+  printf '一方、次は保証していない。読むときに補って解釈すること。\n\n'
+  printf -- '- **どのルールが落としたかは見ていない。** 「実際に止めた層」の列はゲート単位であり、\n'
+  printf '  意図したルールが発火したのか、パッチが誘発した別の違反で落ちたのかを区別しない。\n'
+  printf '  同じ層で止まる複数のケース（例: L1-01 と L1-02）は観測上まったく同一になる。\n'
+  printf -- '- **因果は保証していない。** ゲートが赤くなったことと、それがパッチのせいであることは\n'
+  printf '  別である。対照実行はこの隙間を狭めるが、閉じはしない。\n\n'
+  printf '| ケース | 落とし穴 | 手順書の主張 | 実際に止めた層 | 判定 |\n'
+  printf '|---|---|---|---|---|\n'
+} >"$WORK/head.md"
+
+shopt -s nullglob
+for case_dir in verification/cases/*/; do
+  case_id=$(basename "$case_dir")
+  printf '=== %s ===\n' "$case_id" >&2
+  if ! ./verification/run-case.sh "$case_id" >"$WORK/$case_id.json"; then
+    printf '| %s | (実行失敗) | | | ⚠️ 実行不能 |\n' "$case_id" >>"$WORK/rows.md"
+    continue
+  fi
+  node -e '
+    const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+    const mark = {
+      match: "✅ 一致",
+      mismatch: "❌ 別の層が止めた",
+      "not-caught": "❌ どの層も止めなかった",
+      inconclusive: "⚠️ 判定不能",
+    }[r.claimVerdict];
+    const blocked = r.blockedBy.length > 0 ? r.blockedBy.join(", ") : "（なし）";
+    // 設定の回帰（expect と実測のずれ）は本題ではないので注記として添える
+    const note = r.configVerdict === "mismatch"
+      ? " ※設定ずれ: " + r.mismatches.map(m => `${m.gate} 期待 ${m.expected} → 実測 ${m.actual}`).join(" / ")
+      : "";
+    process.stdout.write(`| ${r.expected.id} | ${r.expected.pitfall} | ${r.expected.claimedLayer} | ${blocked} | ${mark}${note} |\n`);
+  ' "$WORK/$case_id.json" >>"$WORK/rows.md"
+done
+
+cat "$WORK/head.md" "$WORK/rows.md" >"$RESULTS"
+printf '\n生成しました: %s\n' "$RESULTS" >&2
+cat "$RESULTS"

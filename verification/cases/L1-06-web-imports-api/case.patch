@@ -1,0 +1,19 @@
+diff --git a/apps/web/src/features/orders/orderTotal.ts b/apps/web/src/features/orders/orderTotal.ts
+index 957a902..c329b98 100644
+--- a/apps/web/src/features/orders/orderTotal.ts
++++ b/apps/web/src/features/orders/orderTotal.ts
+@@ -1,4 +1,5 @@
+ import type { OrderView } from '../../api/client';
++import { applyDiscount } from '../../../../api/src/discount/discount';
+ 
+ /** 全注文の割引後合計 */
+ export function sumDiscountedTotal(orders: readonly OrderView[]): number {
+@@ -9,3 +10,8 @@ export function sumDiscountedTotal(orders: readonly OrderView[]): number {
+ export function isDiscountApplied(order: OrderView): boolean {
+   return order.discountedTotal < order.unitPrice * order.quantity;
+ }
++
++/** API の内部実装を直接使って割引を再計算する（禁止された依存） */
++export function recomputeDiscount(order: OrderView): number {
++  return applyDiscount(order.unitPrice * order.quantity, true);
++}

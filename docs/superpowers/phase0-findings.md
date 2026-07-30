@@ -1,16 +1,26 @@
-# Phase 0 で得られた発見と後続フェーズへの申し送り
+# 各フェーズで得られた発見と後続フェーズへの申し送り
 
 **対象**: `docs/多層品質ゲート_L1-L5_導入手順_NestJS-React.md`（以下「手順書」）
 **設計**: `docs/superpowers/specs/2026-07-29-multilayer-quality-gates-verification-design.md`
-**記録日**: 2026-07-29（Phase 0 完了時点）
+**最終更新**: 2026-07-30（Phase 1 完了時点）
 
-Phase 0（モノレポ基盤とサンプルアプリ）の構築中に判明した事実を、手順書への修正提案候補と後続フェーズへの申し送りに分けて記録する。Phase 6 の検証レポートはこの文書を原資とする。
+各フェーズの構築中に判明した事実を、手順書への修正提案候補と後続フェーズへの申し送りに分けて記録する。**Phase 6 の検証レポートはこの文書を原資とする。** フェーズごとに追記していく。
+
+> ファイル名は `phase0-findings.md` だが、Phase 0 専用ではない。Phase 1 以降の発見もここに追記する。既存の参照を壊さないため名前は変えていない。
+
+**記録の範囲**
+- §1 … 手順書への修正提案候補。**実測できたものに限る**（推測は載せない）
+- §2 … 検証ケースの期待値に対する申し送り
+- §3 … フェーズ別の技術的申し送り
+- §4 … 各フェーズの受け入れ確認記録
 
 ---
 
 ## 1. 手順書への修正提案候補
 
-Phase 6 の検証レポートに載せる項目。**Phase 0 の時点で既に実測できたもの**に限る。
+Phase 6 の検証レポートに載せる項目。**実測できたものに限る。**
+
+1.1〜1.6 は Phase 0、1.7〜1.13 は Phase 1 で確定した。
 
 ### 1.1 Prisma の postinstall は pnpm workspace でスキーマを発見できない（仮説 2 の更新）
 
@@ -87,6 +97,116 @@ Phase 0 では検証ノイズを避けるため Prisma 6.19.3（`prisma-client-j
 
 **手順書への提案**：カバレッジを常時取る（`--coverage` を付ける）か、`outputs` を外すか、どちらかに揃える。
 
+### 1.7 手順書 §2.4 は ESLint 設定ファイルを 2 つ書き漏らしている（仮説 6 の結論）
+
+手順書 §2.4 は `packages/eslint-config/index.js` と `apps/web/eslint.config.js` しか示していない。ESLint 10 は lint 対象ファイルから上方向に設定ファイルを探索し、**見つかった設定で上位の設定を置き換える（マージしない）**。実測で確認した。
+
+そのため `pnpm eslint .` をルートで成立させるには次の 2 つが追加で必要だった。
+
+- ワークスペースルートの設定 — `packages/shared` などパッケージ固有設定を持たない場所を担当する。無いと設定ファイル未検出で失敗する
+- `apps/api` の設定 — NestJS 固有設定を当てる
+
+さらに、**ファイル名を `eslint.config.js` にできるのはそのパッケージが `"type": "module"` のときだけ**である。`apps/web`（Vite、`type: module`）では動くが、`apps/api`（NestJS、CommonJS）とルートでは ESM 構文が落ちるため `eslint.config.mjs` にする必要がある。手順書はこの点に触れていない。
+
+### 1.8 `no-unused-disable` は非推奨かつ no-op（仮説 7 の結論）
+
+設計書 §7 の仮説 7 は「`reportUnusedDisableDirectives` と `eslint-comments/no-unused-disable` は機能重複し二重報告になる」としていたが、**実測では二重報告は起きなかった**。実際の問題は別だった。
+
+| 設定 | 重大度 | `--max-warnings=0` あり | なし |
+|---|---|---|---|
+| 何も設定しない（ESLint 10 の既定） | warn | exit 1 | exit 0 |
+| プラグインの `no-unused-disable` のみ | warn（既定と同一出力） | exit 1 | exit 0 |
+| `linterOptions.reportUnusedDisableDirectives: 'error'` | error | exit 1 | exit 1 |
+
+プラグインルールは既定と同じ warn しか出さず**何も追加していない（no-op）**。加えて `no-unused-disable` は **4.7.0 で deprecated、5.0.0 で削除予定**であり、非推奨メッセージ自体が「ESLint 組み込みの `linterOptions` を使え」と指示している。
+
+**手順書への提案**：§2.4 のルール一覧から `no-unused-disable` を削除する。`linterOptions.reportUnusedDisableDirectives: 'error'` は残す（ESLint 10 の既定は `warn` なので、`--max-warnings=0` を付けない実行では見逃すため意味がある）。
+
+### 1.9 §2.4 の `no-restricted-imports` は相対パスの越境 import を検出できない（検証ケース L1-06 の結論）
+
+Phase 1 の検証ケース 6 本のうち唯一、**手順書の主張どおりに止まらなかった**ケースである（`verification/RESULTS.md` の `L1-06-web-imports-api` 行）。
+
+手順書 §10 は「Web から API の内部実装を直接 import する」を L1 が捕まえる落とし穴として挙げ、§2.4 は `no-restricted-imports` の `patterns` でこれを禁じる構成を示している。実測すると、この構成は相対パスでの越境 import を**まったく検出しない**。
+
+```ts
+// apps/web/src/features/orders/orderTotal.ts
+import { applyDiscount } from '../../../../api/src/discount/discount';
+```
+
+このパスは `apps/api/src/discount/discount` に解決される。`patterns: [{ group: ['**/apps/api/src/**'] }]` を設定していても lint は通る。
+
+| import の書き方 | `no-restricted-imports` |
+|---|---|
+| `'../../../../api/src/discount/discount'` | 発火しない |
+| `'@repo/../apps/api/src/discount/discount'` | 発火する |
+
+**原因**：`no-restricted-imports` の `patterns` は**解決後のパスではなく、ソースに書かれた import 指定子の文字列**に対する glob マッチである。相対パスの文字列には `apps/api` が現れないため、どんな `group` を書いても一致しない。
+
+型チェックも止めない。`apps/web/tsconfig.json` の `include` は `src/**` だけだが、**`include` は起点ファイルを絞るだけで、import 経由で到達したファイルを型チェックから免除しない**。`discount.ts` 自体に型エラーが無いため `tsc` は成功する。
+
+**手順書への提案**：§2.4 の依存境界の強制を `no-restricted-imports` に頼らない。解決後のパスで判定する `eslint-plugin-import` の `import/no-restricted-paths` に置き換えるか、併用する。`no-restricted-imports` を残す場合は「パッケージ名での import しか止められない」という限界を明記する。
+
+### 1.10 §2.5 は turbo 経由のゲートの exit code に触れていない
+
+`turbo` は**子プロセスの exit code をそのまま透過する**。`tsc` は型エラーで 2 を返すので `pnpm turbo typecheck` も 2 になる。一方 turbo 自身の異常（存在しないタスク名、壊れた `turbo.json`）は 1 である。実測で確認した。
+
+| 状況 | exit code |
+|---|---|
+| `tsc` が型エラーを検出（1 パッケージ / 2 パッケージ同時とも） | 2 |
+| 存在しないタスク名 | 1 |
+| 壊れた `turbo.json` | 1 |
+
+つまり exit code だけでは「タスクが失敗した」と「turbo 自身が壊れた」を一般には区別できない。1 を fail とするツール（ESLint など）を turbo 経由で回すと、turbo 自身の異常と衝突する。
+
+Phase 1 では、この取り違えを実際に踏んだ。`scripts/gates/l1-typecheck.sh` を「turbo は失敗時 1」という前提で書いたため、**型エラーが「ツールが実行できなかった」に、turbo の設定ミスが「欠陥を検出した」に**写像されていた。設計書 §6.1 が最重要と位置づけた区別が、ちょうど反転していた。
+
+**手順書への提案**：§2.5 でゲートを turbo 経由にするなら、exit code の扱いを明記する。少なくとも「turbo は子の code を透過するので、CI で exit code を解釈する場合はツールごとの契約を確認すること」を書く。
+
+### 1.11 §2.4 の共通 ESLint 設定は Node のグローバルを与えない
+
+`js.configs.recommended` の `no-undef` が有効なまま、`**/*.js` / `**/*.mjs` のブロックに `languageOptions.globals` を設定していないため、リポジトリ内の Node スクリプト（CI 補助、検証用ツールなど）がすべて `process is not defined` で落ちる。手順書は `globals` パッケージにも代替手段にも触れていない。
+
+Phase 1 では `verification/lib/judge.mjs` がこれに当たり、ファイルローカルの `/* global process -- ... */` で回避した。Node スクリプトを足すたびに同じコメントが増える構造である。
+
+**手順書への提案**：§2.4 の `.js` / `.mjs` ブロックに `languageOptions: { globals: globals.node }` を含める（`globals` パッケージが必要）か、`no-undef` を切る旨を明記する。
+
+### 1.12 ゲートの前段チェックは、ガード対象と同じスコープで呼ばないと常に失敗する
+
+pnpm のフィルタは `exec` **より前**に置く必要がある。実測:
+
+| コマンド | exit |
+|---|---|
+| `pnpm exec prisma --version` | 1 |
+| `pnpm --filter api exec prisma --version` | 0 |
+| `pnpm exec --filter api prisma --version` | 1 |
+
+`prisma` は `apps/api` だけの依存なので、フィルタ無しの `pnpm exec` はワークスペース全体を再帰的に試して失敗する。ゲートの前段で「ツールが起動できるか」を確認するとき、スコープがずれると **ツールが有るのに「無い」と判定して常に error になる**。Phase 1 で実際に踏み、全ケースが `inconclusive` になった。
+
+関連して、`pnpm exec` は対象バイナリが見つからないとき **pnpm 自身が 1 を返す**。これをそのままゲートの生 exit code として扱うと、「`node_modules` が壊れている」が「lint 違反あり」と記録される。設計書 §6.1 が名指しで警戒している誤記録である。
+
+**手順書への提案**：§2.5 のゲート定義に、前提条件チェック（ツールが起動できるか）の節を設ける。手順書は現状これに一切触れていない。
+
+### 1.13 「ゲートが緑」と「ゲートが守っている」は別物である（Phase 1 で 4 回観測）
+
+これは手順書の特定の記述への指摘ではなく、**手順書の構成そのものへの指摘**である。Phase 1 では、ゲートが緑を返しているのに何も検査していない状態を 4 回踏んだ。
+
+| # | 何が起きたか | どうやって気づいたか |
+|---|---|---|
+| 1 | ルート `eslint.config.mjs` の `ignores: ['apps/**']` がグローバル ignore として**ディレクトリ走査そのものを止め**、`eslint .` が 3 ファイルしか見ずに exit 0 を返していた（`apps/` 配下 0 件） | 実装者の自己申告。ファイル数を数えて初めて分かった |
+| 2 | `apps/web` のテストが `afterEach(cleanup)` を持たず、前のテストが残した DOM ノードに対してアサートしていた。自分の render を検証しないまま緑だった | Phase 0 の最終レビュー |
+| 3 | `gates.test.sh` が pass 経路と error 経路しか試さないため、`gate_finish` の fail 引数が間違っていても **6/6 成功**した（1.10 の取り違え） | 検証ケース L1-05 の実行 |
+| 4 | 検証ハーネス自身の `parseExpect` が値を検証せず、`expect:` の子が 0 件だと回帰検出が恒に「一致」、`claimed_layer` の 1 文字のタイポで主判定が恒に「不一致」になった | Task 4 のレビュー |
+
+いずれも、**ゲートを追加した直後に「本当に何かを検査しているか」を確認する手順があれば防げた**。手順書は各層の設定方法を示すが、設定が効いていることを確かめる手順を持たない。
+
+**手順書への提案**：各層の導入手順の最後に「意図的に違反を 1 つ入れて、そのゲートが赤くなることを確認する」ステップを設ける。緑を確認するだけでは、そのゲートが何も見ていない状態と区別できない。
+
+### 1.14 §2.4 が使う `tseslint.config()` は deprecated
+
+typescript-eslint 8.65.0 で `tseslint.config()` は非推奨になっており、ESLint コアの `defineConfig()`（`eslint/config`）が推奨されている。動作はするため Phase 1 では手順書に忠実な形を維持したが、手順書のコード例は非推奨 API に依存している。
+
+**手順書への提案**：§2.4 の `tseslint.config()` を `defineConfig()` に置き換える。
+
 ---
 
 ## 2. 検証ケースの期待値に対する申し送り
@@ -113,7 +233,9 @@ Phase 5 で L4 の 2 ケースと同じ基準を適用する。**L3 も一緒に
 
 ## 3. Phase 別の技術的申し送り
 
-### Phase 1（L1 + 検証ハーネス）
+### Phase 1（L1 + 検証ハーネス）— 完了済み
+
+以下は Phase 1 着手前の申し送りで、すべて対応済みである（記録として残す）。
 
 | # | 内容 |
 |---|---|
@@ -130,6 +252,30 @@ Phase 5 で L4 の 2 ケースと同じ基準を適用する。**L3 も一緒に
 | 6 | `OrdersController` のデコレータ順は `@Controller('orders')` → `@UseGuards(AuthGuard)`。手順書 §3.2 の Semgrep カスタムルールは逆順しか `pattern-not` で除外しないため、偽陽性が出るかの検証対象（仮説 5）。**変更しないこと** |
 | 7 | `pnpm-workspace.yaml` の `'@prisma/client': true` は `generate` の turbo 配線後は不要。その postinstall はスキーマを発見できずスタブを作るだけ。`--ignore-scripts` の検証と併せて整理する |
 | 8 | `prisma generate` が `DATABASE_URL` 未設定の環境でどう振る舞うか未確認。cloudbuild 相当を組むときに env の受け渡しを意識する |
+| 16 | **`scripts/gates/l2-install.sh` はツールの実行失敗を fail(1) に写像している。** lockfile 不整合は確かに fail だが、レジストリ到達不能・ネットワーク断・`prisma generate` のクラッシュも同じ 1 になる。Phase 1 は全ケース `claimed_layer: L1` なので誤った ✅ は生まないが、**L2 を主張するケースを足すとネットワーク障害が「✅ 一致」になる**。L2 ケース追加前に、ログから `ERR_PNPM_OUTDATED_LOCKFILE` 等を判別して fail を絞る方針を決めること |
+| 17 | **`run-case.sh` は `node_modules` を検証ブランチの状態のまま元ブランチに戻す。** Phase 1 のケースは `package.json` を触らないので無害だが、`L2-01-phantom-package` / `L2-04-new-dependency` は触る。cleanup 後に復元しないと**次のケースが汚染された `node_modules` の上で走る**。`run-all.sh` の対照実行は先頭で 1 回しか取らないのでこれを検出できない |
+| 18 | **ゲート一覧が 2 箇所にハードコードされている。** `run-case.sh` のゲート実行部と `run-all.sh` の対照実行ループ。L2 で 4 本増えるとき両方を同期する必要がある。共通の配列 1 箇所に寄せること |
+| 19 | **`gates.test.sh` は `l2-install.sh` を一切テストしない。** L2 側の回帰は実ケース実行でしか発覚しない（1.12 の不具合がまさにそれ）。L2 ゲート追加時は同種のテストを用意する |
+| 20 | **`RESULTS.md` はルール ID を照合していない。** `blockedBy` はゲート単位なので、同じ層で止まる複数ケースは観測上同一になる。`expect_detection` は `parseExpect` が読むだけで `judge()` は参照しない。ルール ID 照合を入れるなら、L1-03（`no-floating-promises`）と L1-01 / L1-02 の区別から着手する |
+| 21 | **`judge.mjs` の `layerOfGate` はゲート名の先頭 2 文字に依存している。** `l1-lint` → `L1`。層プレフィクス無しの名前（`semgrep.sh` など）を付けると `'SE'` という層が生まれ、`claimVerdict` が静かに `mismatch` 固定になる。ゲート名は必ず `lN-` で始めること |
+| 22 | **ルート `eslint.config.mjs` の `ignores` に `apps/**` を足してはいけない。** `files` を伴わない `ignores` はグローバル ignore でディレクトリ走査を止め、L1 ゲートが空振りする。Phase 1 で一度踏んだ |
+| 23 | **`shellcheck` が未インストール。** Phase 2 でゲートが 4→8 本に増えると未検証のシェルコードが倍増する。環境準備に含めることを推奨 |
+
+### Phase 1 で見送った Minor（Phase 2 以降で気が向いたら）
+
+| 内容 |
+|---|
+| `run-all.sh` は `pitfall` や設定ずれ注記に `\|` が含まれると Markdown 表が壊れる（エスケープ無し）。ケースを増やす前に `sed 's/|/\\|/g'` を 1 行入れるのが安い |
+| `run-case.sh` / `run-all.sh` の `mktemp -d` は後片付けが無く `/tmp` に溜まる。ログを残す意図なら `WORK` のパスを stderr に出すと拾える |
+| `gates.test.sh` の `TOTAL=6` はハードコードでチェック数と非結合。チェックを足したとき更新漏れが静かに起きる |
+| `gates.test.sh` のエラー経路テストは `PATH=/usr/bin:/bin` で pnpm を消すが、git も消える環境ではラベルと実際の原因が食い違う |
+| ケース 0 件のとき `run-all.sh` の `cat` が `rows.md` 不在で stderr にエラーを出す（`RESULTS.md` のヘッダは正しく生成される） |
+| `RESULTS.md` の列名「実際に止めた層」にゲート名が入るため、L1-03 のように 2 ゲートが並ぶと「2 つの層が止めた」と誤読されうる。判定ロジック（`blockingLayers` を Set で畳む）は正しい。列名変更は設計書 §8.4 の表形式に関わるので Phase 6 で判断する |
+| `run-all.sh` は tracked な `RESULTS.md` を書き換えるので、commit するか `git checkout` で戻さないと二度続けて回せない（2 回目は全行が「⚠️ 実行不能」になる） |
+| `judge.mjs` の `parseActual` が読む `summary` 列は `judge()` から参照されないデッドデータ。`expectDetection` も Phase 2/5 用の前倒し実装でテストが無い |
+| `apps/web/src/features/orders/OrderList.tsx` に `react-hooks/set-state-in-effect` の抑制コメントがある。手順書 §2.4 は `exhaustive-deps` にしか言及しないが、`eslint-plugin-react-hooks` 7.x の `recommended-latest` はより広いルール面を持ち込む |
+
+---
 
 ### Phase 3（L3）
 
@@ -139,6 +285,7 @@ Phase 5 で L4 の 2 ケースと同じ基準を適用する。**L3 も一緒に
 | 10 | `apps/web/src/api/client.ts` の `(await response.json()) as OrderView[]` は無検証キャスト。`openapi-typescript` の生成型に差し替える境界がここに閉じている |
 | 11 | Playwright MCP が `.playwright-mcp/` を作る。`.gitignore` に追加済み |
 | 12 | `OrdersService.create` は存在しないユーザー ID で FK 違反（P2003）が未処理のため 500 を返す。e2e で「不正ユーザー」を試すと 401/400 ではなく 500 になる |
+| 24 | **`scripts/gates/l1-typecheck.sh` の fail code は tsconfig の形に依存している。** 現在 `gate_finish "$?" 2` が正しいのは `--noEmit` 前提だから。`composite` / project references / `noEmitOnError` を入れると `tsc` は `DiagnosticsPresent_OutputsSkipped` = 1 を返し、**型エラーが「ツールが実行できなかった」に化ける**。`gates.test.sh` は fail 経路を試さないのでこの回帰を検出できない（1.13 の表 #3 と同じ穴）。tsconfig を触るタスクの受け入れ条件に「`./verification/run-case.sh L1-05-unchecked-index` が `l1-typecheck: fail` を返すこと」を入れること |
 
 ### Phase 4（L4）
 
@@ -150,7 +297,9 @@ Phase 5 で L4 の 2 ケースと同じ基準を適用する。**L3 も一緒に
 
 ---
 
-## 4. Phase 0 の受け入れ確認記録
+## 4. 各フェーズの受け入れ確認記録
+
+### Phase 0（モノレポ基盤とサンプルアプリ）
 
 | 項目 | 結果 |
 |---|---|
@@ -161,3 +310,27 @@ Phase 5 で L4 の 2 ケースと同じ基準を適用する。**L3 も一緒に
 | `POST /orders` 不正入力（`quantity: 0`） | HTTP 400 |
 | `http://localhost:5173` の画面表示 | 会員は 2 件・キーボードのみ割引・合計 1680 円／非会員はモニター 1 件・割引なし・合計 5000 円（Playwright で確認） |
 | `README.md` の手順が白紙から通る | 通る（`turbo` の `generate` 配線後） |
+
+### Phase 1（L1 + 検証ハーネス）
+
+| 項目 | 結果 |
+|---|---|
+| `pnpm exec eslint . --max-warnings=0` | exit 0（31 ファイル走査、うち `apps/` 配下 28） |
+| `pnpm turbo build typecheck test` | 9 タスク成功、23 テスト |
+| `./scripts/gates/gates.test.sh` | 6 件成功（pass 経路・error 経路・呼び出し位置非依存） |
+| `node --test verification/lib/judge.test.mjs` | 12 件成功 |
+| `verification/RESULTS.md` | L1 系 6 ケースの判定を記録。**5 件 ✅ 一致 / 1 件 ❌ どの層も止めなかった（L1-06、§1.9）** |
+| `./verification/run-all.sh` 実行後の状態 | 作業ツリークリーン、`verify/*` ブランチ残存なし |
+| ゲートの exit code 実測 | `l1-typecheck`: 型エラー → 1(fail) / クリーン → 0(pass) / pnpm 不在 → 2(error)。`l1-lint` / `l2-install` も同様 |
+| 仮説 6・7 | 結論を §1.7 / §1.8 に記録 |
+
+**Phase 1 で確定した検証ケース 6 本**（`verification/cases/`）
+
+| ケース | 落とし穴 | 止めたゲート | 判定 |
+|---|---|---|---|
+| `L1-01-eslint-disable-abuse` | `eslint-disable` でファイル全体を黙らせる | `l1-lint` | ✅ |
+| `L1-02-explicit-any` | `any` で型チェックを回避する | `l1-lint` | ✅ |
+| `L1-03-floating-promise` | `await` 忘れで Promise を放置する | `l1-lint`（`no-floating-promises` 単独で発火。実測確認済み） | ✅ |
+| `L1-04-unused-disable` | 効いていない `eslint-disable` を残す | `l1-lint` | ✅ |
+| `L1-05-unchecked-index` | 配列添字アクセスの `undefined` を考慮しない | `l1-typecheck` | ✅ |
+| `L1-06-web-imports-api` | Web から API の内部実装を直接 import する | **（なし）** | ❌ |

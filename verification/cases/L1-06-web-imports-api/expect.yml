@@ -1,0 +1,7 @@
+id: L1-06-web-imports-api
+pitfall: Web から API の内部実装を直接 import する
+claimed_layer: L1
+expect:
+  l2-install: pass
+  l1-typecheck: pass
+  l1-lint: pass

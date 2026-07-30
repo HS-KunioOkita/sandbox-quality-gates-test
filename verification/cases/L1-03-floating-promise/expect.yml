@@ -1,0 +1,7 @@
+id: L1-03-floating-promise
+pitfall: await 忘れで Promise を放置する
+claimed_layer: L1
+expect:
+  l2-install: pass
+  l1-typecheck: pass
+  l1-lint: fail

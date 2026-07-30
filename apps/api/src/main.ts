@@ -17,6 +17,7 @@ async function bootstrap(): Promise<void> {
 }
 
 bootstrap().catch((cause: unknown) => {
+  // eslint-disable-next-line no-console -- 起動失敗はログ以外に伝える手段が無い
   console.error('API の起動に失敗しました', cause);
   process.exit(1);
 });
