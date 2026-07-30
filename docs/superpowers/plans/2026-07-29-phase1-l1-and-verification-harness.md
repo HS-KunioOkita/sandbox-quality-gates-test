@@ -516,6 +516,8 @@ exit 1
 
 `exit 1`（fail）の検証はここに入れない。実際の欠陥を注入する必要があり、それは Task 5 の検証ケースで行う。ここでは **pass 経路・error 経路・呼び出し位置非依存** の 3 点を固める。
 
+**この割り切りには代償がある。** fail 経路を試さないので、`gate_finish` に渡す「fail とみなす code」が間違っていても 6 件すべて成功する。実際に Phase 1 でこれが起きた（`l1-typecheck.sh` が turbo の code を取り違えていたが `gates.test.sh` は修正前も修正後も 6/6 成功だった）。Task 5 の検証ケースが唯一の検出手段である。
+
 - [ ] **Step 2: テストが失敗することを確認**
 
 ```bash
@@ -600,8 +602,12 @@ gate_require_repo
 gate_require_cmd pnpm
 
 pnpm turbo typecheck
-# turbo はタスク失敗時に 1 を返す。それ以外の非ゼロは turbo 自身の異常なので error。
-gate_finish "$?" 1
+# turbo は子プロセスの exit code をそのまま透過する。tsc は型エラーで 2 を返すので
+# fail は 2 である。turbo 自身の異常（タスク名が無い / turbo.json が壊れている）は 1 なので、
+# 1 は error 側に残す。ここを `gate_finish "$?" 1` にすると型エラーが「ツールが実行できなかった」
+# と記録され、逆に turbo の設定ミスが「欠陥を検出した」になる。実測で確認済み:
+#   型エラーあり → 2 / 存在しないタスク名 → 1 / 壊れた turbo.json → 1
+gate_finish "$?" 2
 ```
 
 `set -e` を使っていないのは、`pnpm turbo typecheck` の非ゼロ exit を捕まえて `gate_finish` に渡す必要があるためである。`set -e` があるとその時点で終了してしまう。
@@ -1347,6 +1353,8 @@ git checkout -- .
 なので `git diff` には現れない。ブランチを切ると、戻り先を間違えたときに気づきにくい。
 
 **パッチは context 付き（既定の 3 行）で作る。** 周辺コードが変わったときに黙って別の場所に当たるのではなく、失敗して気づけるようにするため。設計書 §8.3 の「パッチが当たらない → 即中断」はこの前提に立っている。
+
+**ケースを作ったら実行前にコミットする。** `run-case.sh` は作業ツリーがクリーンでなければ exit 2 で中断する。`git status --porcelain` は未追跡ファイルも `??` として報告するので、`verification/cases/<ID>/` を作っただけの状態では実行できない。ケースをまとめて作り、コミットしてから実行する。
 
 - [ ] **Step 1: `L1-02-explicit-any` のパッチを作る**
 
