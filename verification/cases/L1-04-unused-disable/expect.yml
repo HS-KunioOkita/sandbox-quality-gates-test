@@ -1,0 +1,7 @@
+id: L1-04-unused-disable
+pitfall: 効いていない eslint-disable を残す
+claimed_layer: L1
+expect:
+  l2-install: pass
+  l1-typecheck: pass
+  l1-lint: fail
