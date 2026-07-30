@@ -201,6 +201,12 @@ pnpm のフィルタは `exec` **より前**に置く必要がある。実測:
 
 **手順書への提案**：各層の導入手順の最後に「意図的に違反を 1 つ入れて、そのゲートが赤くなることを確認する」ステップを設ける。緑を確認するだけでは、そのゲートが何も見ていない状態と区別できない。
 
+### 1.14 §2.4 が使う `tseslint.config()` は deprecated
+
+typescript-eslint 8.65.0 で `tseslint.config()` は非推奨になっており、ESLint コアの `defineConfig()`（`eslint/config`）が推奨されている。動作はするため Phase 1 では手順書に忠実な形を維持したが、手順書のコード例は非推奨 API に依存している。
+
+**手順書への提案**：§2.4 の `tseslint.config()` を `defineConfig()` に置き換える。
+
 ---
 
 ## 2. 検証ケースの期待値に対する申し送り
@@ -254,6 +260,22 @@ Phase 5 で L4 の 2 ケースと同じ基準を適用する。**L3 も一緒に
 | 21 | **`judge.mjs` の `layerOfGate` はゲート名の先頭 2 文字に依存している。** `l1-lint` → `L1`。層プレフィクス無しの名前（`semgrep.sh` など）を付けると `'SE'` という層が生まれ、`claimVerdict` が静かに `mismatch` 固定になる。ゲート名は必ず `lN-` で始めること |
 | 22 | **ルート `eslint.config.mjs` の `ignores` に `apps/**` を足してはいけない。** `files` を伴わない `ignores` はグローバル ignore でディレクトリ走査を止め、L1 ゲートが空振りする。Phase 1 で一度踏んだ |
 | 23 | **`shellcheck` が未インストール。** Phase 2 でゲートが 4→8 本に増えると未検証のシェルコードが倍増する。環境準備に含めることを推奨 |
+
+### Phase 1 で見送った Minor（Phase 2 以降で気が向いたら）
+
+| 内容 |
+|---|
+| `run-all.sh` は `pitfall` や設定ずれ注記に `\|` が含まれると Markdown 表が壊れる（エスケープ無し）。ケースを増やす前に `sed 's/|/\\|/g'` を 1 行入れるのが安い |
+| `run-case.sh` / `run-all.sh` の `mktemp -d` は後片付けが無く `/tmp` に溜まる。ログを残す意図なら `WORK` のパスを stderr に出すと拾える |
+| `gates.test.sh` の `TOTAL=6` はハードコードでチェック数と非結合。チェックを足したとき更新漏れが静かに起きる |
+| `gates.test.sh` のエラー経路テストは `PATH=/usr/bin:/bin` で pnpm を消すが、git も消える環境ではラベルと実際の原因が食い違う |
+| ケース 0 件のとき `run-all.sh` の `cat` が `rows.md` 不在で stderr にエラーを出す（`RESULTS.md` のヘッダは正しく生成される） |
+| `RESULTS.md` の列名「実際に止めた層」にゲート名が入るため、L1-03 のように 2 ゲートが並ぶと「2 つの層が止めた」と誤読されうる。判定ロジック（`blockingLayers` を Set で畳む）は正しい。列名変更は設計書 §8.4 の表形式に関わるので Phase 6 で判断する |
+| `run-all.sh` は tracked な `RESULTS.md` を書き換えるので、commit するか `git checkout` で戻さないと二度続けて回せない（2 回目は全行が「⚠️ 実行不能」になる） |
+| `judge.mjs` の `parseActual` が読む `summary` 列は `judge()` から参照されないデッドデータ。`expectDetection` も Phase 2/5 用の前倒し実装でテストが無い |
+| `apps/web/src/features/orders/OrderList.tsx` に `react-hooks/set-state-in-effect` の抑制コメントがある。手順書 §2.4 は `exhaustive-deps` にしか言及しないが、`eslint-plugin-react-hooks` 7.x の `recommended-latest` はより広いルール面を持ち込む |
+
+---
 
 ### Phase 3（L3）
 
