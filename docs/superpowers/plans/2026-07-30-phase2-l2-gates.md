@@ -312,22 +312,23 @@ chmod +x scripts/gates/l2-osv.sh
 
 **このステップを飛ばしてはいけない。** Step 3 の緑は「ゲートが何も見ていない」状態と区別がつかない。
 
-`pnpm-workspace.yaml` の `overrides` を一時的に外して、Task 1 で消した脆弱性を戻す。
+`l2-osv.sh` は `pnpm-lock.yaml` を直に読むだけで `node_modules` を必要としない。したがって **lockfile を Task 1 以前の姿に戻すだけで赤を再現できる。** `pnpm install` は不要である。
 
 ```bash
-cp pnpm-workspace.yaml /tmp/pws.bak
-# overrides の 2 行（`overrides:` と `  brace-expansion: 5.0.8`）を削除する
-pnpm install --no-frozen-lockfile --ignore-scripts
+# Task 1 で override を入れる前の lockfile に戻す（brace-expansion 1.1.16 / 2.1.2 が復活する）
+git show c7bc476:pnpm-lock.yaml > pnpm-lock.yaml
 ./scripts/gates/l2-osv.sh; echo "exit=$?"
 ```
-期待: **exit 1**。`brace-expansion` の GHSA-mh99-v99m-4gvg が出る。
+
+期待: **exit 1**。`brace-expansion` 1.1.16 / 2.1.2 の GHSA-mh99-v99m-4gvg が出る。
 
 ```bash
-cp /tmp/pws.bak pnpm-workspace.yaml
-pnpm install --frozen-lockfile --ignore-scripts
+git checkout -- pnpm-lock.yaml
 git status --porcelain   # 空であること
 ./scripts/gates/l2-osv.sh; echo "exit=$?"   # 0 に戻ること
 ```
+
+**`pnpm-workspace.yaml` の `overrides` を外して `pnpm install --no-frozen-lockfile` で戻す方法は使わないこと。** Task 1 の実測で、`overrides` の追加は `--no-frozen-lockfile` でも無言でスキップされることが分かっている（pnpm 11.x）。削除も同様に無視される可能性が高く、lockfile が変わらないまま「ゲートが赤くならなかった」という誤った結論を招く。加えて `minimumReleaseAge: 10080` があるため、フル再解決を促すと `ERR_PNPM_NO_MATURE_MATCHING_VERSION` で落ちる。
 
 - [ ] **Step 6: コミット**
 
