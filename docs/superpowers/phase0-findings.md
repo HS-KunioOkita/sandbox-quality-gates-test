@@ -87,6 +87,31 @@ Phase 0 では検証ノイズを避けるため Prisma 6.19.3（`prisma-client-j
 
 **手順書への提案**：カバレッジを常時取る（`--coverage` を付ける）か、`outputs` を外すか、どちらかに揃える。
 
+### 1.7 手順書 §2.4 は ESLint 設定ファイルを 2 つ書き漏らしている（仮説 6 の結論）
+
+手順書 §2.4 は `packages/eslint-config/index.js` と `apps/web/eslint.config.js` しか示していない。ESLint 10 は lint 対象ファイルから上方向に設定ファイルを探索し、**見つかった設定で上位の設定を置き換える（マージしない）**。実測で確認した。
+
+そのため `pnpm eslint .` をルートで成立させるには次の 2 つが追加で必要だった。
+
+- ワークスペースルートの設定 — `packages/shared` などパッケージ固有設定を持たない場所を担当する。無いと設定ファイル未検出で失敗する
+- `apps/api` の設定 — NestJS 固有設定を当てる
+
+さらに、**ファイル名を `eslint.config.js` にできるのはそのパッケージが `"type": "module"` のときだけ**である。`apps/web`（Vite、`type: module`）では動くが、`apps/api`（NestJS、CommonJS）とルートでは ESM 構文が落ちるため `eslint.config.mjs` にする必要がある。手順書はこの点に触れていない。
+
+### 1.8 `no-unused-disable` は非推奨かつ no-op（仮説 7 の結論）
+
+設計書 §7 の仮説 7 は「`reportUnusedDisableDirectives` と `eslint-comments/no-unused-disable` は機能重複し二重報告になる」としていたが、**実測では二重報告は起きなかった**。実際の問題は別だった。
+
+| 設定 | 重大度 | `--max-warnings=0` あり | なし |
+|---|---|---|---|
+| 何も設定しない（ESLint 10 の既定） | warn | exit 1 | exit 0 |
+| プラグインの `no-unused-disable` のみ | warn（既定と同一出力） | exit 1 | exit 0 |
+| `linterOptions.reportUnusedDisableDirectives: 'error'` | error | exit 1 | exit 1 |
+
+プラグインルールは既定と同じ warn しか出さず**何も追加していない（no-op）**。加えて `no-unused-disable` は **4.7.0 で deprecated、5.0.0 で削除予定**であり、非推奨メッセージ自体が「ESLint 組み込みの `linterOptions` を使え」と指示している。
+
+**手順書への提案**：§2.4 のルール一覧から `no-unused-disable` を削除する。`linterOptions.reportUnusedDisableDirectives: 'error'` は残す（ESLint 10 の既定は `warn` なので、`--max-warnings=0` を付けない実行では見逃すため意味がある）。
+
 ---
 
 ## 2. 検証ケースの期待値に対する申し送り
