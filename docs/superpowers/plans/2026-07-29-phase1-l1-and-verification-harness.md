@@ -1051,9 +1051,11 @@ import base from '@repo/eslint-config';
 export default [
   ...base,
   {
-    // apps/* は自分の設定ファイルを持つ。docs は lint 対象外。
-    // docs は lint 対象外。apps/** は入れないこと（グローバル ignore は走査を止め、
-    // apps 配下がゲートの対象外になる）。
+    // docs は Markdown だけなので lint 対象外。
+    // apps/** は絶対に入れないこと。files を伴わない ignores はグローバル ignore で
+    // ディレクトリ走査そのものを止めるため、apps 配下が L1 ゲートの対象外になる。
+    // apps/* は自分の eslint.config.mjs を持つが、それは「ルートで無視してよい」
+    // という意味ではない。ルートの eslint . が全体を走査する。
     ignores: ['docs/**'],
   },
 ];
@@ -1099,15 +1101,18 @@ if [ -z "$CASE_ID" ]; then
   exit 2
 fi
 
-CASE_DIR="verification/cases/$CASE_ID"
-if [ ! -f "$CASE_DIR/case.patch" ] || [ ! -f "$CASE_DIR/expect.yml" ]; then
-  printf 'エラー: %s に case.patch と expect.yml が必要です\n' "$CASE_DIR" >&2
-  exit 2
-fi
-
+# 作業ツリーの確認は引数の妥当性より先。このスクリプトはブランチを切って
+# パッチを当てるので、汚れたツリーでは何もしてはいけない。ケース ID が
+# 間違っていても、まず「今この状態では動かせない」を報告する。
 if [ -n "$(git status --porcelain)" ]; then
   printf 'エラー: 作業ツリーが汚れています。コミットまたは stash してください\n' >&2
   git status --short >&2
+  exit 2
+fi
+
+CASE_DIR="verification/cases/$CASE_ID"
+if [ ! -f "$CASE_DIR/case.patch" ] || [ ! -f "$CASE_DIR/expect.yml" ]; then
+  printf 'エラー: %s に case.patch と expect.yml が必要です\n' "$CASE_DIR" >&2
   exit 2
 fi
 
