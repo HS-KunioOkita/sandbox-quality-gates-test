@@ -557,11 +557,18 @@ M17 のとおり、semgrep も検証ケースのパッチと計画ドキュメ�
 # 脆弱なコード片を含む。これらは「適用前の記述」なので走査しない。
 # パッチを適用したあとの apps/ 配下の実ファイルは走査対象のまま残る。
 #
+# 先頭の / でリポジトリルートに固定する。gitignore 構文では先頭 / の無い `docs/` は
+# 任意の階層の docs ディレクトリに一致するため、`apps/web/docs/` のような場所が
+# 黙って走査対象から外れる。Task 3 の gitleaks 側で実際にこの盲点を踏んだ。
+#
 # 独自の .semgrepignore は semgrep の既定を置き換えるが、semgrep は git 追跡
 # ファイルのみを走査するので node_modules は除外されたまま（実測: 走査対象 68 ファイル）。
-verification/cases/
-docs/
+# `.superpowers/` は gitignore 済みで semgrep の走査対象に入らないため書かない。
+/verification/cases/
+/docs/superpowers/
 ```
+
+**この 2 行が意図どおりに効いているかを測ること。** gitignore 構文の先頭 `/` を `.semgrepignore` が同じ意味で解釈するかは未確認である。効いていなければ（＝ルート直下の対象が除外されない、あるいは逆に広すぎる）、実測に合わせて書式を決め、その結果を報告に書く。
 
 - [ ] **Step 5: `l2-semgrep.sh` を書く**
 
