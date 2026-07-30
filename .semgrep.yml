@@ -1,2 +1,12 @@
 # .semgrep.yml（ルールセットの指定）
 rules: []   # カスタムルールはここに追加
+
+# ---
+# 上の 2 行は手順書 §3.2 からの逐語転記（このファイルの検証対象そのもの）。
+#
+# 実測: `semgrep scan --config .semgrep.yml` 単体では exit 0・`Nothing to scan.` に
+# なるだけで、何も走査しない（rules が空のため）。
+#
+# したがって scripts/gates/l2-semgrep.sh はこのファイルを --config に渡していない。
+# 実際のカスタムルール（nest-controller-without-guard）は .semgrep/nestjs.yml にある。
+# 「ここにルールを追加」というコメントに従って書いても、ゲートには反映されない。

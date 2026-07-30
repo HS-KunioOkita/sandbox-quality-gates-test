@@ -9,7 +9,7 @@
 # 黙って走査対象から外れる。Task 3 の gitleaks 側で実際にこの盲点を踏んだ。
 #
 # 独自の .semgrepignore は semgrep の既定を置き換えるが、semgrep は git 追跡
-# ファイルのみを走査するので node_modules は除外されたまま（実測: 走査対象 68 ファイル）。
+# ファイルのみを走査するので node_modules は除外されたまま。
 # `.superpowers/` は gitignore 済みで semgrep の走査対象に入らないため書かない。
 /verification/cases/
 /docs/superpowers/
