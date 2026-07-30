@@ -32,6 +32,18 @@ gate_require_repo() {
   fi
 }
 
+# pnpm exec 経由で使うツールが起動できることを確認する。起動できなければ error で終了する。
+#
+# pnpm exec は対象バイナリが見つからないとき pnpm 自身が 1 を返す。その 1 をそのまま
+# gate_finish に渡すと「ツールが実行できなかった」が「欠陥を検出した」と記録される。
+# node_modules が壊れている状態を「lint 違反あり」と読み違えるのが、この関数が防ぐ事故である。
+gate_require_pnpm_tool() {
+  if ! pnpm exec "$@" >/dev/null 2>&1; then
+    printf 'gate error: %s を実行できません（pnpm install が必要かもしれません）\n' "$1" >&2
+    exit "$GATE_ERROR"
+  fi
+}
+
 # 生 exit code を 3 値へ正規化して終了する。
 #   $1        生 exit code
 #   $2 以降   fail とみなす生 exit code（列挙）
