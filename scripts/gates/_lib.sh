@@ -15,6 +15,12 @@ GATE_PASS=0
 GATE_FAIL=1
 GATE_ERROR=2
 
+# Docker イメージは latest を使わず固定する。リポジトリの依存固定方針と同じ理由（再現性）に
+# 加えて、ツールの版が変わるとゲートの挙動が黙って変わり、検証結果の意味が失われるため。
+GATE_IMG_SEMGREP='semgrep/semgrep:1.171.0'
+GATE_IMG_OSV='ghcr.io/google/osv-scanner:v2.4.0'
+GATE_IMG_GITLEAKS='zricethezav/gitleaks:v8.30.1'
+
 # 指定コマンドが使えなければ error で終了する
 gate_require_cmd() {
   local cmd="$1"
@@ -48,6 +54,20 @@ gate_require_runnable() {
   shift
   if ! "$@" >/dev/null 2>&1; then
     printf 'gate error: %s を実行できません（pnpm install が必要かもしれません）\n' "$label" >&2
+    exit "$GATE_ERROR"
+  fi
+}
+
+# Docker が使えることを確認する。使えなければ error で終了する。
+#
+# 設計書 §6.1 が「このハーネス最大の誤判定リスク」と呼ぶのがここである。
+# Docker デーモンが止まっているだけの状態を「ゲートが欠陥を検出した」と記録すると、
+# 検証結果そのものが無意味になる。docker コマンドの存在だけでは足りない。
+# デーモンが止まっていても docker バイナリは在り、run は非ゼロで落ちる。
+gate_require_docker() {
+  gate_require_cmd docker
+  if ! docker info >/dev/null 2>&1; then
+    printf 'gate error: Docker デーモンが起動していません（Docker Desktop を起動してください）\n' >&2
     exit "$GATE_ERROR"
   fi
 }
