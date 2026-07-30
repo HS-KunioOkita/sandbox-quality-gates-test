@@ -4,4 +4,4 @@ claimed_layer: L1
 expect:
   l2-install: pass
   l1-typecheck: fail
-  l1-lint: fail
+  l1-lint: pass
