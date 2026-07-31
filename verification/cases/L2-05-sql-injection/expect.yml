@@ -6,7 +6,9 @@ expect:
   l2-install: pass
   l1-typecheck: pass
   l1-lint: pass
-  l2-semgrep: fail
+  # 実測: 5 つのルールセット + カスタムルールを回しても 0 findings。
+  # $queryRawUnsafe の文字列連結には無反応（claimed_layer/claimed_gate は変更しない。not-caught が成果物）。
+  l2-semgrep: pass
   l2-osv: pass
   l2-gitleaks: pass
 expect_detection:
