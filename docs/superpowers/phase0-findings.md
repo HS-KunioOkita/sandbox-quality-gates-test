@@ -195,7 +195,7 @@ pnpm のフィルタは `exec` **より前**に置く必要がある。実測:
 
 **手順書への提案**：§2.5 のゲート定義に、前提条件チェック（ツールが起動できるか）の節を設ける。手順書は現状これに一切触れていない。
 
-### 1.13 「ゲートが緑」と「ゲートが守っている」は別物である（Phase 1 で 4 回 / Phase 2 で 6 回観測）
+### 1.13 「ゲートが緑」と「ゲートが守っている」は別物である（Phase 1 で 4 回踏み、Phase 2 でさらに 6 回観測）
 
 これは手順書の特定の記述への指摘ではなく、**手順書の構成そのものへの指摘**である。Phase 1 では、ゲートが緑を返しているのに何も検査していない状態を 4 回踏んだ。
 
@@ -210,18 +210,20 @@ pnpm のフィルタは `exec` **より前**に置く必要がある。実測:
 
 **手順書への提案**：各層の導入手順の最後に「意図的に違反を 1 つ入れて、そのゲートが赤くなることを確認する」ステップを設ける。緑を確認するだけでは、そのゲートが何も見ていない状態と区別できない。
 
-#### Phase 2 での追加観測（6 件）
+#### Phase 2 での追加観測（6 件 = 実際に踏んだ 4 件 + 事前に気づいた 2 件）
 
-Phase 2 でも同じ型を 6 回踏んだ。**うち 4 件は手順書の記述をそのまま実行した結果であり、手順書に従った人が同じ場所で必ず踏む。**
+Phase 2 でも同じ型を 6 回**観測**した。Phase 1 の 4 件はすべて実際に踏んだものだが、Phase 2 の 6 件は**踏んだ 4 件と、踏む前に気づいて回避した 2 件**の混在である。件数だけを引くと過大評価になるので、表で区別する。
 
-| # | 何が起きたか | どうやって気づいたか |
-|---|---|---|
-| 5 | `semgrep ci` から `--config` を外すと、未ログインでも**警告 1 行を出して exit 0** を返す。何も走査していないのにゲートは緑（§1.15） | 手順書のコマンドが `--error` で exit 2 になったので、代替形を 1 つずつ実測した |
-| 6 | 手順書 §3.2 の `.semgrep.yml`（`rules: []`）は `Nothing to scan.` と出して exit 0。設定エラーにもならない。これをゲートの `--config` にすると**永久に緑**（§1.16） | 同上 |
-| 7 | gitleaks 8.30.1 は **AWS 公式の例示キー（`AKIAIOSFODNN7EXAMPLE`）を検出しない**。導入確認にこれを使うと、空振りしているゲートを「緑＝正常」と誤認する（§1.24） | 検証ケースの題材を選ぶ段階で、先に例示キーで発火するか実測した |
-| 8 | 偽陽性を**値ベース**で allowlist に入れると、その値を使う本物の欠陥も黙る。秘密検出ゲートが空振りする（§1.24） | 設計判断として先に気づき、パスベースの除外を選んだ |
-| 9 | Docker 不在ガードの検証を `PATH=/usr/bin:/bin` で行うと `gate_require_cmd docker`（バイナリ不在）で止まり、**本体である `docker info`（デーモン不在）の分岐は一度も実行されない**。exit 2 は観測できるので検証は通るが、設計書 §6.1 が最大の誤判定リスクと呼ぶ経路は未検証のまま | Task 2 のレビュー。`DOCKER_HOST` を存在しないソケットに向けて分岐を通す形に直し、Task 6 で `gates.test.sh` に恒久化した（メッセージ文字列まで照合する） |
-| 10 | `cd "$(git rev-parse --show-toplevel)" \|\| exit 2` は**絶対に発火しない**（`cd ""` は exit 0 を返す）。リポジトリ外から `run-all.sh` を実行すると `set -u` で abort し **exit 1**＝ error が fail として記録される | Task 8 のレビュー。修正前のスクリプトを `git show` で取り出しリポジトリ外から実行して再現 |
+**踏んだ 4 件のうち 2 件（#5・#6）は手順書の記述をそのまま実行した結果**であり、手順書に従った人が同じ場所で踏む。残り 2 件（#9・#10）は検証する側のコード（ゲートのテストとハーネス）で起きた。
+
+| # | 区分 | 何が起きたか | どうやって気づいたか |
+|---|---|---|---|
+| 5 | **踏んだ**（手順書由来） | `semgrep ci` から `--config` を外すと、未ログインでも**警告 1 行を出して exit 0** を返す。何も走査していないのにゲートは緑（§1.15） | 手順書のコマンドが `--error` で exit 2 になったので、代替形を 1 つずつ実測した |
+| 6 | **踏んだ**（手順書由来） | 手順書 §3.2 の `.semgrep.yml`（`rules: []`）は `Nothing to scan.` と出して exit 0。設定エラーにもならない。これをゲートの `--config` にすると**永久に緑**（§1.16） | 同上 |
+| 7 | 事前に気づいた | gitleaks 8.30.1 は **AWS 公式の例示キー（`AKIAIOSFODNN7EXAMPLE`）を検出しない**。導入確認にこれを使うと、空振りしているゲートを「緑＝正常」と誤認する（§1.24） | 検証ケースの題材を選ぶ段階で、先に例示キーで発火するか実測した。**踏んではいない** |
+| 8 | 事前に気づいた | 偽陽性を**値ベース**で allowlist に入れると、その値を使う本物の欠陥も黙る。秘密検出ゲートが空振りする（§1.24） | 設計判断として先に気づき、パスベースの除外を選んだ。**踏んではいない。また手順書は allowlist に一切触れていないので手順書由来でもない**（この罠は導入者が自力で回避するしかない、というのが指摘の中身） |
+| 9 | **踏んだ**（検証側） | Docker 不在ガードの検証を `PATH=/usr/bin:/bin` で行うと `gate_require_cmd docker`（バイナリ不在）で止まり、**本体である `docker info`（デーモン不在）の分岐は一度も実行されない**。exit 2 は観測できるので検証は通るが、設計書 §6.1 が最大の誤判定リスクと呼ぶ経路は未検証のまま | Task 2 のレビュー。`DOCKER_HOST` を存在しないソケットに向けて分岐を通す形に直し、Task 6 で `gates.test.sh` に恒久化した（メッセージ文字列まで照合する） |
+| 10 | **踏んだ**（検証側） | `cd "$(git rev-parse --show-toplevel)" \|\| exit 2` は**絶対に発火しない**（`cd ""` は exit 0 を返す）。リポジトリ外から `run-all.sh` を実行すると `set -u` で abort し **exit 1**＝ error が fail として記録される | Task 8 のレビュー。修正前のスクリプトを `git show` で取り出しリポジトリ外から実行して再現 |
 
 **この型はハーネス側にも当てはまった。** Phase 2 のレビュー層が出した「緑だが何も固定していない」型の指摘は 7 件（#9・#10 を含む）で、内訳は次のとおり。
 
@@ -303,7 +305,7 @@ Ran 147 rules on 77 files: 0 findings
 
 ### 1.18 §3.2 の Semgrep カスタムルールは記述どおりに動く（仮説 5 の結論）
 
-**Phase 2 で唯一、手順書が正しいと実測で確認できた項目である。**
+**Phase 2 が仮説として疑った手順書の記述のうち、実測で「手順書が正しい」と確認できた項目である**（他に手順書の記述が正しく機能した実測は §1.24 の秘密検出の 2 経路冗長性と、`osv-scanner --lockfile=` という v1 書式が v2.4.0 でも通ることがある。**「Phase 2 で唯一の正解」ではない**）。
 
 設計書 §7 の仮説 5 は「手順書 §3.2 のカスタムルール `nest-controller-without-guard` は、`@Controller` → `@UseGuards` の順に書かれたコントローラで `pattern-not` が効かず偽陽性を出すのではないか」というものだった（申し送り #6）。
 
@@ -330,9 +332,15 @@ Ran 147 rules on 77 files: 0 findings
 - `l2-install` が **`ERR_PNPM_OUTDATED_LOCKFILE` で exit 1**。lockfile に無い依存が `package.json` にある時点で止まる
 - OSV-Scanner はそもそも実行に到達しない。到達したとしても**脆弱性データベースに存在しないパッケージについて言うことは何も無い**
 
-判定は `claimVerdict: match`（層は L2 で一致）だが `claimGateVerdict: mismatch`（手順書が名指しした `l2-osv` は無反応）。**層の粒度だけで測っていたら ✅ 一致で終わっていた**ケースであり、`claimed_gate` を導入した判断の実証にもなっている。
+判定は `claimVerdict: match`（層は L2 で一致）だが `claimGateVerdict: mismatch`（ケースの `claimed_gate` に書いた `l2-osv` は無反応）。**層の粒度だけで測っていたら ✅ 一致で終わっていた**ケースであり、`claimed_gate` を導入した判断の実証にもなっている。
 
-**手順書への提案**：§3.3 ② の OSV-Scanner の位置づけを「既知脆弱性のあるバージョンの検出」に限定する。架空パッケージ（AI が生成しがちな存在しない依存名）への対策は ① の `--frozen-lockfile` が担っており、OSV-Scanner はこの用途では機能しないことを明記する。
+**手順書の主張との関係を正確に書く（要約時に誤らないため）。** 手順書 §10（807 行）の当該行は次のとおりで、**OSV-Scanner 単独が捕まえるとは書いていない**。
+
+> | 存在しないパッケージを import | L2 | lockfile 固定＋OSV-Scanner＋新規依存の人間承認 |
+
+`claimed_gate: l2-osv` はケース側が「この 3 つのうちどれが実際に効いたのか」を切り分けるために置いた検証上の指定であり（変更不可）、手順書の主張そのものではない。**したがって「手順書は OSV が捕まえると言ったが捕まえなかった」と要約してはいけない。** 実測が示したのは、**§10 が並置した 3 つの手段のうち実際に止めたのは lockfile 固定だけで、OSV-Scanner は寄与しなかった**ということである。
+
+**手順書への提案**：§10 のこの行と §3.3 ② で、3 つの手段の役割を分けて書く。lockfile 固定が架空パッケージを止め、OSV-Scanner は「既知脆弱性のあるバージョンの検出」を担い、**架空パッケージには寄与しない**（脆弱性データベースに存在しないパッケージについて言うことは無い）。3 つを「＋」で並べると、どれが何を担うのかが読者に伝わらない。
 
 ### 1.20 `osv-scanner --lockfile=` は直接指定していない推移的依存で赤くなる
 
@@ -340,13 +348,15 @@ Ran 147 rules on 77 files: 0 findings
 
 原因は `brace-expansion`（GHSA-mh99-v99m-4gvg）。このリポジトリが直接指定した依存ではなく、推移的に引き込まれたものである。Phase 2 では `pnpm-workspace.yaml` の `overrides` で解決した。
 
-つまりこのゲートは、**自分が書いていないコードの都合で任意のタイミングで赤くなる**。手順書は抑制手段（pnpm の `overrides`、`osv-scanner.toml` の `IgnoredVulns`）にも、その運用負荷にも触れていない。
+つまりこのゲートは、**自分が書いていないコードの都合で任意のタイミングで赤くなる**。手順書は抑制手段にも、その運用負荷にも触れていない。
 
-**手順書への提案**：§3.3 ② に (a) 推移的依存で赤くなること、(b) 抑制の手段と、抑制に期限を設ける運用（`osv-scanner.toml` の `ignoreUntil`）を追記する。
+**手順書への提案**：§3.3 ② に (a) 推移的依存で赤くなること、(b) 抑制の手段と、抑制に期限を設ける運用を追記する。
+
+> **実測したのは (a) と、pnpm の `overrides` で解決できることだけである。** `osv-scanner.toml` による抑制（`IgnoredVulns` / `ignoreUntil`）は**このプロジェクトでは試していない**。提案の裏付けとしては未実測であることに注意。
 
 ### 1.21 §3.3 は pnpm 側の供給網設定に触れていないが、`minimumReleaseAge` には無視できない運用コストがある
 
-手順書 §3.3 は `--frozen-lockfile` と `--ignore-scripts` しか扱っておらず、pnpm 側の供給網設定（`blockExoticSubdeps` / `minimumReleaseAge` / `trustPolicy`）に触れていない。一方 **semgrep の `p/nodejs` はこれらの設定を要求してくる**（ERROR ではなく MEDIUM の指摘として）。
+手順書 §3.3 は `--frozen-lockfile` と `--ignore-scripts` しか扱っておらず、pnpm 側の供給網設定（`blockExoticSubdeps` / `minimumReleaseAge` / `trustPolicy`）に触れていない。一方 **semgrep はこれらの設定を要求してくる**。Phase 2 で観測したのはルール ID 3 件・重大度 MEDIUM（ERROR ではない）で、**どのルールセットが出したかは測っていない**。ゲートは `p/typescript` / `p/nodejs` / `p/react` / `p/owasp-top-ten` / `p/secrets` を同時に渡しているので、レジストリのこの 5 セットのいずれかである。
 
 Phase 2 では semgrep の指摘に従って `minimumReleaseAge: 10080`（7 日）を入れた。その結果、**このリポジトリの「依存は全て最新版に完全固定」という方針と構造的に衝突した**。実測で 2 回踏んでいる。
 
@@ -373,13 +383,19 @@ Phase 2 では semgrep の指摘に従って `minimumReleaseAge: 10080`（7 日�
 
 ### 1.23 §3.3 の新規依存検出コマンドはルート直下の `package.json` を見逃す
 
-手順書 §3.3 末尾は、新しい依存が追加されたかを次のコマンドで検出するよう書いている。
+手順書 §3.3 末尾（334-336 行）は、新しい依存が追加されたかを次のコマンドで検出するよう書いている（原文どおり）。
 
 ```bash
-git diff --name-only "$BASE".."$HEAD" -- '**/package.json'
+# 新しい依存が追加されたかを検出し、検出時はラベルを付けて人間レビューへ回す
+git diff "origin/$_BASE_BRANCH...HEAD" -- '**/package.json' \
+  | grep -E '^\+\s+"' && echo "NEW_DEPENDENCY_DETECTED"
 ```
 
-実測すると、**このパススペックはルート直下の `package.json` に一致しない**。ルートと `packages/eslint-config/package.json` の両方を変更したコミット間で試すと、返るのは後者だけである（レビュアーも独立に再現）。
+同じコマンドが §7 の `cloudbuild.yaml`（680-688 行、`l2-new-deps` ステップ）にも `grep -qE` の形で再掲されている。
+
+問題はパススペック `'**/package.json'` である。**これはルート直下の `package.json` に一致しない。** ルートと `packages/eslint-config/package.json` の両方を変更したコミット間で `git diff --name-only <ref>..<ref> -- '**/package.json'` を実行すると、返るのは後者だけである（レビュアーも独立に再現）。
+
+> 測定には、どのファイルが返るかを直接見るため `--name-only` と二点の range を使った。**手順書の原文には `--name-only` も二点 range も無い。** パススペックの一致規則は `--name-only` の有無にも range の書式にも依存しないので、この差は結論に影響しない。
 
 | パススペック | ルートの `package.json` | 配下の `package.json` |
 |---|---|---|
@@ -388,7 +404,9 @@ git diff --name-only "$BASE".."$HEAD" -- '**/package.json'
 
 モノレポのルート `package.json` には devDependencies（ツールチェーン一式）が入るのが普通なので、**手順書の形は最も監視したい場所を見逃している**。
 
-あわせて、手順書が示す `grep -E '^\+\s+"'` は**依存の追加以外にも反応する**。`scripts` へのエントリ追加や、既存依存のバージョン変更でも行が増えるためである。非ブロック（ラベル付与）の用途なので致命的ではないが、人間レビューへ回る件数は増える。
+あわせて、手順書が示す `grep -E '^\+\s+"'` は**依存の追加以外にも反応する**。`scripts` へのエントリ追加や、既存依存のバージョン変更でも、この正規表現に一致する追加行が生まれるためである。非ブロック（ラベル付与）の用途なので致命的ではないが、人間レビューへ回る件数は増える。
+
+> **これは実測ではなく正規表現からの演繹である。** `^\+\s+"` は「追加行で、インデントの後にダブルクォート」以外を見ておらず、`package.json` の中でその形を取るのは `dependencies` の行に限らない。Phase 2 でこの偽陽性を実際に観測したわけではない。
 
 **手順書への提案**：パススペックを `'*package.json'` に直す。`grep` の限界（追加以外にも反応する）も注記する。
 
@@ -414,7 +432,7 @@ git diff --name-only "$BASE".."$HEAD" -- '**/package.json'
 
 仮説 2（`pnpm install --ignore-scripts` が Prisma の生成を止める）は **Phase 0 で結論済み**である（§1.1 / §1.3）。実態は仮説より深刻で、`--ignore-scripts` の有無に関わらず postinstall はスキーマを発見できずスタブを生成する。対処は `turbo.json` に `generate` タスクを置き、`build` / `typecheck` / `test` から依存させることだった。
 
-Phase 2 で新たに確認したのは、**その対処が `--ignore-scripts` を併用する L2 のインストールゲートの下でも成立する**ことである。`scripts/gates/l2-install.sh` は `pnpm install --frozen-lockfile --ignore-scripts` の後に `pnpm --filter api exec prisma generate` を明示する形で、`run-all.sh` の**対照実行（パッチ無し）で exit 0**、続く 11 ケースでも `L2-01-phantom-package`（架空パッケージで意図的に lockfile を不整合にしたケース）以外の 10 ケースで exit 0 だった。後続の `l1-typecheck` がすべて通っていることから、Prisma Client がスタブではなく実体として生成されていることも裏付けられる。
+Phase 2 で新たに確認したのは、**その対処が `--ignore-scripts` を併用する L2 のインストールゲートの下でも成立する**ことである。`scripts/gates/l2-install.sh` は `pnpm install --frozen-lockfile --ignore-scripts` の後に `pnpm --filter api exec prisma generate` を明示する形で、`run-all.sh` の**対照実行（パッチ無し）で exit 0**、続く 11 ケースでも `L2-01-phantom-package`（架空パッケージで意図的に lockfile を不整合にしたケース）以外の 10 ケースで exit 0 だった。**型エラーを注入した `L1-05-unchecked-index` を除き `l1-typecheck` も通っている**ことから、Prisma Client がスタブではなく実体として生成されていることも裏付けられる（スタブなら `OrderGetPayload` が無く §1.1 の `TS2694` で落ちる）。
 
 §1.1 の提案（§3.3 に Prisma の明示的な生成手順を追記する）に変更は無い。
 
@@ -560,7 +578,7 @@ Phase 2 の各タスクで `minor (deferred)` として記録したものを最�
 | 12 | `OrdersService.create` は存在しないユーザー ID で FK 違反（P2003）が未処理のため 500 を返す。e2e で「不正ユーザー」を試すと 401/400 ではなく 500 になる |
 | 24 | **`scripts/gates/l1-typecheck.sh` の fail code は tsconfig の形に依存している。** 現在 `gate_finish "$?" 2` が正しいのは `--noEmit` 前提だから。`composite` / project references / `noEmitOnError` を入れると `tsc` は `DiagnosticsPresent_OutputsSkipped` = 1 を返し、**型エラーが「ツールが実行できなかった」に化ける**。`gates.test.sh` は fail 経路を試さないのでこの回帰を検出できない（1.13 の表 #3 と同じ穴）。tsconfig を触るタスクの受け入れ条件に「`./verification/run-case.sh L1-05-unchecked-index` が `l1-typecheck: fail` を返すこと」を入れること |
 | 25 | **`claimed_gate` は非ブロックゲートを扱えない。** `blockedBy` は fail したゲートの集合なので、exit code が常に 0 の `l2-new-deps` は**構造上そこに入らない**。`L2-04-new-dependency` の `claimVerdict` / `claimGateVerdict` は原理的に `match` になりえず、`RESULTS.md` は手順書の設計どおり動いているケースを ❌ と表示する（§1.26）。`run-all.sh` の判定表示も同じ。**Phase 3 以降で (a) 非ブロックゲート用の照合列を足す（`expect_detection` を `judge()` から参照させる）か、(b) `claimed_gate` を非ブロックゲートに使わない規約にするか、を決めること。** 決めるまでは Phase 6 のレポートで L2-04 の行に注釈が必須になる |
-| 26 | **`run-all.sh` の所要時間が約 40 分になった**（11 ケース × 7 ゲート + 対照実行、Phase 1 は 6 ケース × 3 ゲートで 15〜25 分）。ケースが 19 本になる Phase 5 では**1 時間を超える**。Bash ツールのタイムアウト上限（10 分）を既に超えているのでバックグラウンド実行が前提になる。semgrep のレジストリ取得（毎回 147 ルールを取得している）のキャッシュ、Docker イメージの事前 pull、ケースの並列実行などを検討する |
+| 26 | **`run-all.sh` の所要時間が概ね 40 分に伸びた**（11 ケース × 7 ゲート + 対照実行、Phase 1 は 6 ケース × 3 ゲートで 15〜25 分）。**この 40 分は厳密な計測値ではない**（ログにタイムスタンプが無く、実行者の申告とログファイルの mtime しか根拠が無い）。`run-all.sh` に経過時間の出力を足すのが最初の一手である。ケースが 19 本になる Phase 5 では**1 時間を超える**。Bash ツールのタイムアウト上限（10 分）を既に超えているのでバックグラウンド実行が前提になる。semgrep のレジストリ取得（毎回 147 ルールを取得している）のキャッシュ、Docker イメージの事前 pull、ケースの並列実行などを検討する |
 | 27 | **申し送り #20（ルール ID 照合）は未解決のまま。** `claimed_gate` でゲート粒度までは上がったが、**同じゲート内でどのルールが落としたか**は依然として見ていない。`l2-semgrep` は 147 ルールを走らせるので、意図したカスタムルールが発火したのか `p/owasp-top-ten` の別ルールが発火したのかを区別できない。L1-03（`no-floating-promises`）と L1-01 / L1-02 の区別も同じ状態。ルール ID を出す層（semgrep の JSON 出力、ESLint の `--format json`）は既にあるので、`actual.tsv` に列を足すのが最短 |
 
 ### Phase 4（L4）
@@ -620,7 +638,7 @@ Phase 2 の各タスクで `minor (deferred)` として記録したものを最�
 | `shellcheck scripts/gates/*.sh verification/*.sh` | exit 0（指摘 0） |
 | `pnpm turbo build typecheck test` | exit 0。9 タスク成功、23 テスト（api 13 / web 10） |
 | `pnpm exec eslint . --max-warnings=0` | exit 0 |
-| `./verification/run-all.sh` | 対照実行が通り、11 ケースすべて判定。所要 **約 40 分** |
+| `./verification/run-all.sh` | 対照実行が通り、11 ケースすべて判定。所要は **概ね 40 分**（後述のとおり厳密な計測ではない） |
 | `./verification/run-all.sh` 実行後の状態 | 作業ツリークリーン、`verify/*` ブランチ残存なし |
 | 仮説 1 | 結論を §1.15 に記録（予測は外れ。実態はより悪い） |
 | 仮説 2 | Phase 0 で結論済み（§1.1 / §1.3）。Phase 2 で `--ignore-scripts` 併用下の成立を再確認（§1.25） |
@@ -632,7 +650,7 @@ Phase 2 の各タスクで `minor (deferred)` として記録したものを最�
 
 | ケース | 落とし穴 | 手順書の主張 | 止めたゲート | 判定 |
 |---|---|---|---|---|
-| `L2-01-phantom-package` | 存在しないパッケージを import する | L2（`l2-osv`） | `l2-install` | ❌ 層は一致・主張したツールは無反応（§1.19） |
+| `L2-01-phantom-package` | 存在しないパッケージを import する | L2（ケースの `claimed_gate` は `l2-osv`） | `l2-install` | ❌ 層は一致・`claimed_gate` のツールは無反応（§1.19。**手順書 §10 は OSV 単独を主張していない**） |
 | `L2-02-guard-missing` | Controller から認可ガードを外す | L2（`l2-semgrep`） | `l2-semgrep` | ✅ |
 | `L2-03-hardcoded-secret` | API キーらしき文字列をハードコードする | L2 | `l2-semgrep`, `l2-gitleaks` | ✅ |
 | `L2-04-new-dependency` | 実在する新規依存を追加する | L2（`l2-new-deps`） | **（なし）** | ❌ **ただしハーネスの限界であって手順書の失敗ではない。検出自体は成立している（§1.26）** |

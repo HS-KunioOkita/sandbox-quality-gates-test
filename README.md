@@ -65,7 +65,7 @@ pnpm lint                        # eslint . --max-warnings=0
 | `l1-lint` | `pnpm exec eslint . --max-warnings=0` | 不要 |
 | `l2-semgrep` | `semgrep scan`（レジストリの 5 セット + `.semgrep/nestjs.yml` のカスタムルール） | **必要** |
 | `l2-osv` | `osv-scanner --lockfile=pnpm-lock.yaml` | **必要** |
-| `l2-gitleaks` | `gitleaks detect --redact`（`.gitleaks.toml` を `--config` で明示） | **必要** |
+| `l2-gitleaks` | `gitleaks detect --no-git --redact`（手順書の原文を検証するため非推奨の `detect` を使う。`.gitleaks.toml` は `--config` で明示） | **必要** |
 | `l2-new-deps` | 新規依存の検出。**非ブロック**（常に exit 0、出力のマーカーで伝える） | 不要 |
 
 実行順と一覧は `scripts/gates/gates.list.sh` に集約してある。
@@ -74,7 +74,7 @@ pnpm lint                        # eslint . --max-warnings=0
 
 ```bash
 ./verification/run-case.sh <CASE-ID>   # 1 ケース（約 3 分）
-./verification/run-all.sh              # 全ケース + 対照実行（実測 約 40 分）
+./verification/run-all.sh              # 全ケース + 対照実行（概ね 40 分）
 ```
 
 `run-all.sh` は `verification/RESULTS.md` を生成する。作業ツリーがクリーンでないと中断するので、ケースを追加したらコミットしてから実行すること。実行後は `RESULTS.md` の差分をコミットするか `git checkout` で戻す。
