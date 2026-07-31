@@ -75,8 +75,10 @@ for case_dir in verification/cases/*/; do
   case_id=$(basename "$case_dir")
   printf '=== %s ===\n' "$case_id" >&2
   stderr_log="$WORK/$case_id.stderr.log"
-  if ! ./verification/run-case.sh "$case_id" >"$WORK/$case_id.json" 2>"$stderr_log"; then
-    cat "$stderr_log" >&2
+  ./verification/run-case.sh "$case_id" >"$WORK/$case_id.json" 2>"$stderr_log"
+  case_status=$?
+  cat "$stderr_log" >&2
+  if [ "$case_status" -ne 0 ]; then
     # node_modules の復元失敗（run-case.sh 末尾、pnpm install --frozen-lockfile が
     # 失敗したときのメッセージ）だけは他の exit 2 と同列に扱ってはいけない。
     # 通常の exit 2（判定不能）は次のケースに影響しないが、これは次のケースが
