@@ -6,3 +6,5 @@ claimed_layer: L2
 claimed_gate: l2-osv
 expect:
   l2-install: fail
+expect_detection:
+  l2-new-deps: true
