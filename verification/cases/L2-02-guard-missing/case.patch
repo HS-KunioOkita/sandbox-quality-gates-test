@@ -1,0 +1,18 @@
+diff --git a/apps/api/src/orders/orders.controller.ts b/apps/api/src/orders/orders.controller.ts
+index 5c247bf..30d9242 100644
+--- a/apps/api/src/orders/orders.controller.ts
++++ b/apps/api/src/orders/orders.controller.ts
+@@ -1,11 +1,10 @@
+-import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
+-import { AuthGuard, type AuthenticatedRequest } from '../auth/auth.guard';
++import { Body, Controller, Get, Post, Req } from '@nestjs/common';
++import { type AuthenticatedRequest } from '../auth/auth.guard';
+ import { CreateOrderDto } from './dto/create-order.dto';
+ import type { OrderResponseDto } from './dto/order-response.dto';
+ import { OrdersService } from './orders.service';
+ 
+ @Controller('orders')
+-@UseGuards(AuthGuard)
+ export class OrdersController {
+   constructor(private readonly ordersService: OrdersService) {}
+ 

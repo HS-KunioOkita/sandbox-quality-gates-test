@@ -1,0 +1,13 @@
+id: L2-05-sql-injection
+pitfall: $queryRawUnsafe で文字列連結して SQL を組み立てる
+claimed_layer: L2
+claimed_gate: l2-semgrep
+expect:
+  l2-install: pass
+  l1-typecheck: pass
+  l1-lint: pass
+  l2-semgrep: fail
+  l2-osv: pass
+  l2-gitleaks: pass
+expect_detection:
+  l2-new-deps: false
