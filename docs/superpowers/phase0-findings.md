@@ -484,6 +484,38 @@ L2 系 5 ケースでも、L1 が先に止めて L2 の観測を隠した例は�
 
 **否定的結果として記録する。** ゲートが増えるほどこの重なりは起きやすくなるので、Phase 3 以降で L3 を足したときに再度観測する価値がある。
 
+### 1.28 秘密検出ゲートの検証フィクスチャは、forge 側の push protection に阻まれる
+
+手順書 §3.3 ③ は `gitleaks detect --no-git --redact` をローカル（CI コンテナ内）で回すことだけを書いている。**そこには無い層が 1 つある。ホスティング先（GitHub）がサーバ側で push を検査する層である。**
+
+Phase 2 の作業ブランチを push しようとしたところ、**GitHub Push Protection が拒否した**（実測）。
+
+```
+remote: error: GH013: Repository rule violations found for refs/heads/feat/phase2-l2-gates.
+remote: - GITHUB PUSH PROTECTION
+remote:     - Push cannot contain secrets
+remote:       —— Amazon AWS Access Key ID ——
+remote:       —— Amazon AWS Secret Access Key ——
+```
+
+検出されたのは `L2-03-hardcoded-secret` の `case.patch` と、この Phase の実装計画書に書かれた同じ文字列である。いずれも検証用に生成した偽の資格情報で、実在しない。
+
+**重要なのは、ローカルのゲートは緑だったことである。** `./scripts/gates/l2-gitleaks.sh` は exit 0 を返す。§1.24 で入れた `.gitleaks.toml` の allowlist が、検証ケースのパッチと計画ドキュメントをパスで除外しているからである。
+
+この非対称は 2 つの理由から生じる。
+
+1. **走査対象が違う。** ローカルの gitleaks は作業ツリーを見る。GitHub Push Protection は **push しようとするコミット履歴**を見る。作業ツリーから消しても、履歴に残っていれば阻まれる。
+2. **設定が届かない。** `.gitleaks.toml` も `.semgrepignore` もリポジトリ内のファイルであり、forge 側の検査には一切影響しない。ローカルで「除外した」ものが、サーバ側では素通りしない。
+
+**手順書への修正提案。** §3.3 ③ に、次の 2 点を補うべきである。
+
+- **ローカルの秘密検出と、forge の push protection は別の層である。** 前者を通しても後者に阻まれることがある。CI で `gitleaks` が緑なら push できる、という前提は成り立たない
+- **秘密検出ゲートを検証しようとすると、その検証フィクスチャ自体が push できなくなる。** 偽の資格情報であっても、検出器から見れば本物と区別がつかない（区別がつく値を使うと、今度はゲートが反応せず検証にならない — §1.24 の AWS 公式例示キーの件がまさにこれ）。GitHub の場合は unblock URL で個別に許可する運用になる
+
+**この Phase での対処**: GitHub が提示した unblock URL で「テストで使用する値」として許可した。履歴の書き換えは選ばなかった。書き換えると、この検証プロジェクトの成果である測定の履歴そのものが失われるうえ、検出器に引っかからない値に差し替えれば `L2-03` の測定（gitleaks と semgrep の両方が反応した）が成立しなくなるためである。
+
+**Phase 3 以降への影響**: L3〜L5 のケースでも、秘密・資格情報を題材にするものは同じ壁に当たる。ケースを設計する段階でこの制約を織り込むこと。
+
 ---
 
 ## 2. 検証ケースの期待値に対する申し送り
