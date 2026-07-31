@@ -82,6 +82,29 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# git apply --index の後、git commit の前に失敗したときの後始末。
+#
+# この時点で BRANCH は BASE_BRANCH とまだ同じコミットを指している（新規コミットが
+# 無い）。cleanup の `git checkout "$BASE_BRANCH"` は、通常なら「未コミットの変更が
+# あるチェックアウト」として失敗するはずだが、ここでは異なる：チェックアウト元と
+# チェックアウト先が同一コミットなので、git はステージ済み/未ステージの変更を
+# 「持ち越し」として扱い、checkout はそのまま成功してしまう。branch -D も同じ理由で
+# 成功する。結果、ユーザーは実ブランチ（BASE_BRANCH）に欠陥パッチがステージされた
+# 状態で取り残され、cleanup 側にはそれを検知する手段が無い（BASE_BRANCH と BRANCH が
+# 同一コミットである、という一致自体は正常系でも起きるため、これだけでは異常の
+# シグナルにならない）。
+#
+# reset --hard で戻して良い理由:
+#   (1) run-case.sh 冒頭のクリーンチェックで、パッチ適用前の作業ツリーは
+#       クリーンだったことを確認済み
+#   (2) ここまでに変更が入ったのはハーネスが直前に作った検証用ブランチ (BRANCH) 上
+#       だけで、まだ新規コミットは無い
+# したがって reset --hard が戻すのは「ハーネス自身がこの実行で入れた変更」に限られ、
+# ユーザーの作業を破壊する余地は無い。
+restore_verify_worktree() {
+  git reset --hard --quiet HEAD 2>/dev/null || true
+}
+
 # 失敗を見逃すと、ユーザーの実ブランチ上で git apply と git commit が行われる。
 if ! git checkout --quiet -b "$BRANCH"; then
   printf 'エラー: 検証ブランチ %s を作成できませんでした\n' "$BRANCH" >&2
@@ -91,10 +114,12 @@ fi
 if ! git apply --index "$CASE_DIR/case.patch" 2>"$LOGS/apply.log"; then
   printf 'エラー: パッチが適用できません。case.patch の更新が必要です\n' >&2
   cat "$LOGS/apply.log" >&2
+  restore_verify_worktree
   exit 2
 fi
 if ! git commit --quiet -m "verify: $CASE_ID"; then
   printf 'エラー: 検証コミットに失敗しました\n' >&2
+  restore_verify_worktree
   exit 2
 fi
 

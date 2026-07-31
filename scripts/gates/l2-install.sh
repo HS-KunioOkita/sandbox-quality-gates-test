@@ -33,4 +33,10 @@ rm -f "$_install_log"
 
 gate_require_runnable prisma pnpm --filter api exec prisma --version
 pnpm --filter api exec prisma generate
-gate_finish "$?" 1
+# schema.prisma が壊れている（実在しうる欠陥）のか、エンジンのダウンロード失敗や
+# generate 自体のクラッシュ（ツールエラー）なのかを exit code だけでは区別できない。
+# 区別できない以上、欠陥を検出したと主張してはいけない（申し送り #16）。fail コードを
+# 1 つも渡さなければ gate_finish は非ゼロをすべて error(2) に倒す。
+# なお現時点でどの検証ケースも schema.prisma を触らないため、この変更で既存の判定は
+# 変わらない。
+gate_finish "$?"

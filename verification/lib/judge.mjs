@@ -37,7 +37,9 @@ export function parseExpect(path) {
       if (section === 'expect') {
         parsed.expect[key] = value;
       } else {
-        parsed.expectDetection[key] = value === 'true';
+        // ここでは生の文字列のまま保持する。真偽値への変換は後段の検査を
+        // 通した後に行う（下記コメント参照）。
+        parsed.expectDetection[key] = value;
       }
       continue;
     }
@@ -87,6 +89,18 @@ export function parseExpect(path) {
     if (value !== 'pass' && value !== 'fail') {
       throw new Error(`expect.yml の expect.${gate} は pass か fail のみです: ${value}`);
     }
+  }
+
+  // expect_detection も同じ理由で検査する。`value === 'true'` で直接変換すると、
+  // `yes` / `ture` / `True` のようなタイポがすべて黙って false になる。false の
+  // つもりのタイポは「検出されなかった」として黙って通り、true のつもりのタイポは
+  // 検出ミスマッチとして表面化する——この非対称は意図したものではない。
+  // pass/fail と同じく throw して run-all.sh に「⚠️ 実行不能」を出させる。
+  for (const [gate, value] of Object.entries(parsed.expectDetection)) {
+    if (value !== 'true' && value !== 'false') {
+      throw new Error(`expect.yml の expect_detection.${gate} は true か false のみです: ${value}`);
+    }
+    parsed.expectDetection[gate] = value === 'true';
   }
 
   return parsed;

@@ -74,7 +74,24 @@ shopt -s nullglob
 for case_dir in verification/cases/*/; do
   case_id=$(basename "$case_dir")
   printf '=== %s ===\n' "$case_id" >&2
-  if ! ./verification/run-case.sh "$case_id" >"$WORK/$case_id.json"; then
+  stderr_log="$WORK/$case_id.stderr.log"
+  if ! ./verification/run-case.sh "$case_id" >"$WORK/$case_id.json" 2>"$stderr_log"; then
+    cat "$stderr_log" >&2
+    # node_modules の復元失敗（run-case.sh 末尾、pnpm install --frozen-lockfile が
+    # 失敗したときのメッセージ）だけは他の exit 2 と同列に扱ってはいけない。
+    # 通常の exit 2（判定不能）は次のケースに影響しないが、これは次のケースが
+    # 汚染された node_modules の上で走ってしまう（申し送り #17 がまさに防ごうとした
+    # 状態）。baseline が赤いときと同じ理由でここも止める。
+    #
+    # run-case.sh は復元失敗を専用の exit code や TSV では返さない（メッセージでしか
+    # 伝えていない）ため、ここではそのメッセージ文字列を判定に使う。run-case.sh 側の
+    # 文言を変えるときはこの grep も合わせて直すこと。
+    if grep -q 'node_modules を .* の状態へ戻せませんでした' "$stderr_log"; then
+      printf 'エラー: %s で node_modules の復元に失敗しました。\n' "$case_id" >&2
+      printf '  以降のケースを汚染された node_modules の上で走らせないよう、ここで中断します。\n' >&2
+      printf '  復旧: pnpm install --frozen-lockfile\n' >&2
+      exit 2
+    fi
     printf '| %s | (実行失敗) | | | ⚠️ 実行不能 |\n' "$case_id" >>"$WORK/rows.md"
     continue
   fi

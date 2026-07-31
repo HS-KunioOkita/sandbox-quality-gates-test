@@ -60,6 +60,19 @@ test('parseExpect は expect の値が pass/fail 以外なら throw する', () 
   assert.throws(() => parseExpect(writeTemp('expect.yml', typo)), /pass か fail のみ/);
 });
 
+test('parseExpect は expect_detection の値が true/false 以外なら throw する', () => {
+  const yes = `id: X\npitfall: p\nclaimed_layer: L2\nexpect:\n  l1-lint: pass\nexpect_detection:\n  l2-new-deps: yes\n`;
+  assert.throws(() => parseExpect(writeTemp('expect.yml', yes)), /true か false のみ/);
+  const typo = `id: X\npitfall: p\nclaimed_layer: L2\nexpect:\n  l1-lint: pass\nexpect_detection:\n  l2-new-deps: ture\n`;
+  assert.throws(() => parseExpect(writeTemp('expect.yml', typo)), /true か false のみ/);
+});
+
+test('parseExpect は expect_detection の true/false を真偽値へ変換する', () => {
+  const yml = `id: X\npitfall: p\nclaimed_layer: L2\nexpect:\n  l1-lint: pass\nexpect_detection:\n  l2-new-deps: true\n`;
+  const parsed = parseExpect(writeTemp('expect.yml', yml));
+  assert.deepEqual(parsed.expectDetection, { 'l2-new-deps': true });
+});
+
 test('parseActual は TSV を読める', () => {
   const tsv = 'l2-install\t0\t-\tok\nl1-typecheck\t0\t-\tok\nl1-lint\t1\t-\t3 problems\n';
   assert.deepEqual(parseActual(writeTemp('actual.tsv', tsv)), {

@@ -17,6 +17,8 @@ gate_require_repo
 gate_require_docker
 
 docker run --rm -v "$PWD:/src:ro" -w /src "$GATE_IMG_OSV" --lockfile=pnpm-lock.yaml
-# osv-scanner は脆弱性を見つけると 1 を返す。それ以外の非ゼロ（lockfile 不在、
-# ネットワーク断、イメージ起動失敗）は error に落とす。
+# osv-scanner は脆弱性を見つけると 1 を返す（実測: クリーン時の 0 と脆弱性検出時の 1
+# のみ実測済み）。それ以外の非ゼロは error に落とす。lockfile 不在・ネットワーク断・
+# イメージ起動失敗が実際にどの非ゼロ値を返すかは未実測であり、ここは「1 以外は
+# error であるべき」という設計方針であって実測に基づく記述ではない。
 gate_finish "$?" 1
