@@ -154,6 +154,10 @@ test('judge は error(2) を含むケースを両方 inconclusive とする', ()
   assert.equal(result.claimVerdict, 'inconclusive');
   assert.equal(result.configVerdict, 'inconclusive');
   assert.deepEqual(result.errored, ['l1-lint']);
+  // 早期リターンの分岐でも claimGateVerdict / detectionMismatches が
+  // 欠落しないことを固定する（欠落すると呼び出し側は undefined を読む）。
+  assert.equal(result.claimGateVerdict, 'inconclusive');
+  assert.deepEqual(result.detectionMismatches, []);
 });
 
 test('judge は複数の層が止めた場合、主張の層が含まれていれば match とする', () => {
@@ -233,6 +237,24 @@ test('非ブロックゲートは fail しないので blockedBy に入らない
   assert.equal(r.claimVerdict, 'not-caught');
 });
 
+test('非ブロックゲートは exit 1 を返しても blockedBy に入らない', () => {
+  // 非ブロックゲートは設計上 exit 1 を返さないが、将来の変更で返すようになったとき
+  // 層の判定に混ざらないことを固定する。code の値だけで除外していると、この形で漏れる
+  // （`l2-new-deps` の exit code は常に 0 なので、code だけを見るチェックでは
+  // このケースを再現できない。detected フィールドで明示的に除外していることを検証する）。
+  const expected = {
+    id: 'X', pitfall: 'p', claimedLayer: 'L1', claimedGate: '',
+    expect: { 'l1-lint': 'fail' }, expectDetection: {},
+  };
+  const actual = {
+    'l1-lint': { code: 1, detected: '-', summary: '' },
+    'l2-new-deps': { code: 1, detected: 'true', summary: '' },
+  };
+  const r = judge(expected, actual);
+  assert.deepEqual(r.blockedBy, ['l1-lint']);
+  assert.deepEqual(r.blockingLayers, ['L1']);
+});
+
 test('非ブロックゲートが error(2) なら inconclusive', () => {
   const expected = {
     id: 'X', pitfall: 'p', claimedLayer: 'L2', claimedGate: '',
@@ -257,5 +279,17 @@ test('claimed_gate の層が claimed_layer と食い違ったら throw', () => {
     'expect.yml',
     'id: X\npitfall: p\nclaimed_layer: L2\nclaimed_gate: l1-lint\nexpect:\n  l1-lint: fail\n',
   );
-  assert.throws(() => parseExpect(p), /claimed_gate/);
+  // 書式不正の throw（メッセージに「不正です」）と取り違えないよう、
+  // 層の食い違いを報告するメッセージ本文に絞る。
+  assert.throws(() => parseExpect(p), /claimed_gate.*の層が.*と一致しません/);
+});
+
+test('claimed_gate の書式が不正なら throw', () => {
+  const p = writeTemp(
+    'expect.yml',
+    'id: X\npitfall: p\nclaimed_layer: L2\nclaimed_gate: L2-OSV\nexpect:\n  l2-osv: fail\n',
+  );
+  // 層の食い違いの throw（メッセージに「一致しません」）と取り違えないよう、
+  // 書式不正を報告するメッセージ本文に絞る。
+  assert.throws(() => parseExpect(p), /claimed_gate が不正です/);
 });
