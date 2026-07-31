@@ -16,13 +16,27 @@ source scripts/gates/_lib.sh
 gate_require_repo
 gate_require_cmd pnpm
 
-pnpm install --frozen-lockfile --ignore-scripts
-raw=$?
+# pnpm は lockfile 不整合もネットワーク断も同じ 1 を返す。exit code だけを見て
+# fail に写像すると、レジストリに繋がらなかっただけの状態が「架空パッケージを
+# 検出した」として ✅ 一致になる。ログの理由コードで切り分ける。
+_install_log=$(mktemp)
+pnpm install --frozen-lockfile --ignore-scripts 2>&1 | tee "$_install_log"
+raw="${PIPESTATUS[0]}"
 if [ "$raw" -ne 0 ]; then
-  # lockfile と package.json の不整合（存在しないパッケージの追加など）は fail
-  gate_finish "$raw" 1
+  # ERR_PNPM_OUTDATED_LOCKFILE : package.json と lockfile がずれている（架空パッケージの追加など）
+  # ERR_PNPM_NO_LOCKFILE       : lockfile が無い
+  # ERR_PNPM_FROZEN_LOCKFILE_WITH_OUTDATED_LOCKFILE : 同上の別表現
+  gate_fail_if_matches "$_install_log" \
+    'ERR_PNPM_OUTDATED_LOCKFILE|ERR_PNPM_NO_LOCKFILE|ERR_PNPM_FROZEN_LOCKFILE'
 fi
+rm -f "$_install_log"
 
 gate_require_runnable prisma pnpm --filter api exec prisma --version
 pnpm --filter api exec prisma generate
-gate_finish "$?" 1
+# schema.prisma が壊れている（実在しうる欠陥）のか、エンジンのダウンロード失敗や
+# generate 自体のクラッシュ（ツールエラー）なのかを exit code だけでは区別できない。
+# 区別できない以上、欠陥を検出したと主張してはいけない（申し送り #16）。fail コードを
+# 1 つも渡さなければ gate_finish は非ゼロをすべて error(2) に倒す。
+# なお現時点でどの検証ケースも schema.prisma を触らないため、この変更で既存の判定は
+# 変わらない。
+gate_finish "$?"

@@ -1,0 +1,15 @@
+id: L2-03-hardcoded-secret
+pitfall: API キーらしき文字列をハードコードする
+claimed_layer: L2
+# 手順書は §3.2 の p/secrets と §3.3 ③ の gitleaks の 2 経路を用意している。
+# どちらか一方でも捕まえれば層としては一致する。ツール名は名指しされていないので
+# claimed_gate は書かない。
+expect:
+  l2-install: pass
+  l1-typecheck: pass
+  l1-lint: pass
+  l2-semgrep: fail
+  l2-osv: pass
+  l2-gitleaks: fail
+expect_detection:
+  l2-new-deps: false

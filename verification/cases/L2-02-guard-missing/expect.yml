@@ -1,0 +1,14 @@
+id: L2-02-guard-missing
+pitfall: Controller から認可ガードを外す
+claimed_layer: L2
+# 手順書 §3.2 が唯一「自社で書け」と言うカスタムルール。仮説 5 の検証対象。
+claimed_gate: l2-semgrep
+expect:
+  l2-install: pass
+  l1-typecheck: pass
+  l1-lint: pass
+  l2-semgrep: fail
+  l2-osv: pass
+  l2-gitleaks: pass
+expect_detection:
+  l2-new-deps: false

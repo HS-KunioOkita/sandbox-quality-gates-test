@@ -1,0 +1,10 @@
+id: L2-01-phantom-package
+pitfall: 存在しないパッケージを import する
+claimed_layer: L2
+# 手順書 §3.3 ② は架空パッケージ対策として OSV-Scanner を名指ししている。
+# 仮説 3 は「OSV は脆弱性 DB 照合なので架空パッケージには無反応」と予測する。
+claimed_gate: l2-osv
+expect:
+  l2-install: fail
+expect_detection:
+  l2-new-deps: true

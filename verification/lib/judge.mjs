@@ -3,15 +3,27 @@ import { readFileSync } from 'node:fs';
 const CODE_PASS = 0;
 const CODE_FAIL = 1;
 
+/** ゲート名から層を導く（'l1-lint' → 'L1'） */
+function layerOfGate(gate) {
+  return gate.slice(0, 2).toUpperCase();
+}
+
 /**
  * 限定形式の expect.yml を読む。
  *
  * 完全な YAML パーサではない。トップレベルは id / pitfall / claimed_layer /
- * expect / expect_detection のみ、expect 系の子はインデント 2 スペースの
- * `<ゲート名>: <値>` のみを受け付ける。
+ * claimed_gate / expect / expect_detection のみ、expect 系の子はインデント
+ * 2 スペースの `<ゲート名>: <値>` のみを受け付ける。
  */
 export function parseExpect(path) {
-  const parsed = { id: '', pitfall: '', claimedLayer: '', expect: {}, expectDetection: {} };
+  const parsed = {
+    id: '',
+    pitfall: '',
+    claimedLayer: '',
+    claimedGate: '',
+    expect: {},
+    expectDetection: {},
+  };
   let section = null;
 
   for (const rawLine of readFileSync(path, 'utf8').split('\n')) {
@@ -25,7 +37,9 @@ export function parseExpect(path) {
       if (section === 'expect') {
         parsed.expect[key] = value;
       } else {
-        parsed.expectDetection[key] = value === 'true';
+        // ここでは生の文字列のまま保持する。真偽値への変換は後段の検査を
+        // 通した後に行う（下記コメント参照）。
+        parsed.expectDetection[key] = value;
       }
       continue;
     }
@@ -43,6 +57,7 @@ export function parseExpect(path) {
     if (key === 'id') parsed.id = value.trim();
     else if (key === 'pitfall') parsed.pitfall = value.trim();
     else if (key === 'claimed_layer') parsed.claimedLayer = value.trim();
+    else if (key === 'claimed_gate') parsed.claimedGate = value.trim();
     else throw new Error(`expect.yml の未知のキーです: ${key}`);
   }
 
@@ -54,6 +69,19 @@ export function parseExpect(path) {
   if (!/^L[1-5]$/.test(parsed.claimedLayer)) {
     throw new Error(`expect.yml の claimed_layer が不正です: ${parsed.claimedLayer}`);
   }
+  // claimed_gate は任意。指定するなら形式を検査し、claimed_layer と矛盾しないことを確かめる。
+  // 食い違ったまま通すと「L2 を主張しているのに L1 のゲートを名指ししている」ケースが
+  // 静かに mismatch 固定になる。
+  if (parsed.claimedGate !== '') {
+    if (!/^l[1-5]-[a-z0-9-]+$/.test(parsed.claimedGate)) {
+      throw new Error(`expect.yml の claimed_gate が不正です: ${parsed.claimedGate}`);
+    }
+    if (layerOfGate(parsed.claimedGate) !== parsed.claimedLayer) {
+      throw new Error(
+        `expect.yml の claimed_gate(${parsed.claimedGate}) の層が claimed_layer(${parsed.claimedLayer}) と一致しません`,
+      );
+    }
+  }
   if (Object.keys(parsed.expect).length === 0) {
     throw new Error('expect.yml の expect が空です');
   }
@@ -63,23 +91,30 @@ export function parseExpect(path) {
     }
   }
 
+  // expect_detection も同じ理由で検査する。`value === 'true'` で直接変換すると、
+  // `yes` / `ture` / `True` のようなタイポがすべて黙って false になる。false の
+  // つもりのタイポは「検出されなかった」として黙って通り、true のつもりのタイポは
+  // 検出ミスマッチとして表面化する——この非対称は意図したものではない。
+  // pass/fail と同じく throw して run-all.sh に「⚠️ 実行不能」を出させる。
+  for (const [gate, value] of Object.entries(parsed.expectDetection)) {
+    if (value !== 'true' && value !== 'false') {
+      throw new Error(`expect.yml の expect_detection.${gate} は true か false のみです: ${value}`);
+    }
+    parsed.expectDetection[gate] = value === 'true';
+  }
+
   return parsed;
 }
 
-/** ゲート実行結果の TSV を読む */
+/** ゲート実行結果の TSV を読む。列は <ゲート名> <exit code> <detected> <summary> */
 export function parseActual(path) {
   const actual = {};
   for (const line of readFileSync(path, 'utf8').split('\n')) {
     if (line.trim() === '') continue;
-    const [gate, code, ...rest] = line.split('\t');
-    actual[gate] = { code: Number(code), summary: rest.join('\t') };
+    const [gate, code, detected, ...rest] = line.split('\t');
+    actual[gate] = { code: Number(code), detected, summary: rest.join('\t') };
   }
   return actual;
-}
-
-/** ゲート名から層を導く（'l1-lint' → 'L1'） */
-function layerOfGate(gate) {
-  return gate.slice(0, 2).toUpperCase();
 }
 
 /**
@@ -92,11 +127,16 @@ function layerOfGate(gate) {
  * ツールが実行できなかっただけの状態を「欠陥を検出した」と読み違えないため。
  */
 export function judge(expected, actual) {
-  const errored = Object.entries(actual)
+  const entries = Object.entries(actual);
+  const isDetectionGate = ([, r]) => r.detected === 'true' || r.detected === 'false';
+
+  const errored = entries
     .filter(([, r]) => r.code !== CODE_PASS && r.code !== CODE_FAIL)
     .map(([gate]) => gate);
 
-  const blockedBy = Object.entries(actual)
+  // 非ブロックゲートは exit code で欠陥を主張しない。層の判定から外す。
+  const blockedBy = entries
+    .filter((e) => !isDetectionGate(e))
     .filter(([, r]) => r.code === CODE_FAIL)
     .map(([gate]) => gate);
 
@@ -105,11 +145,13 @@ export function judge(expected, actual) {
   if (errored.length > 0) {
     return {
       claimVerdict: 'inconclusive',
+      claimGateVerdict: 'inconclusive',
       configVerdict: 'inconclusive',
       errored,
       blockedBy,
       blockingLayers,
       mismatches: [],
+      detectionMismatches: [],
     };
   }
 
@@ -126,6 +168,20 @@ export function judge(expected, actual) {
     }
   }
 
+  // 非ブロックゲートは exit code ではなく出力内容で判定する（設計書 §8.1）。
+  const detectionMismatches = [];
+  for (const [gate, want] of Object.entries(expected.expectDetection)) {
+    const result = actual[gate];
+    if (result === undefined) {
+      detectionMismatches.push({ gate, expected: want, actual: 'not-run' });
+      continue;
+    }
+    const got = result.detected === 'true';
+    if (got !== want) {
+      detectionMismatches.push({ gate, expected: want, actual: got });
+    }
+  }
+
   let claimVerdict;
   if (blockedBy.length === 0) {
     claimVerdict = 'not-caught';
@@ -135,13 +191,27 @@ export function judge(expected, actual) {
     claimVerdict = 'mismatch';
   }
 
+  // 手順書がツール名を名指ししているケースだけ、ゲート粒度でも照合する。
+  // 層は一致するが名指しされたツールは無反応、という形を表に出すため。
+  let claimGateVerdict;
+  if (expected.claimedGate === '') {
+    claimGateVerdict = 'n/a';
+  } else if (blockedBy.includes(expected.claimedGate)) {
+    claimGateVerdict = 'match';
+  } else {
+    claimGateVerdict = 'mismatch';
+  }
+
   return {
     claimVerdict,
-    configVerdict: mismatches.length === 0 ? 'match' : 'mismatch',
+    claimGateVerdict,
+    configVerdict:
+      mismatches.length === 0 && detectionMismatches.length === 0 ? 'match' : 'mismatch',
     errored,
     blockedBy,
     blockingLayers,
     mismatches,
+    detectionMismatches,
   };
 }
 

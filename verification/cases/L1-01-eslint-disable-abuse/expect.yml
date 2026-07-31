@@ -5,3 +5,8 @@ expect:
   l2-install: pass
   l1-typecheck: pass
   l1-lint: fail
+  l2-semgrep: pass
+  l2-osv: pass
+  l2-gitleaks: pass
+expect_detection:
+  l2-new-deps: false

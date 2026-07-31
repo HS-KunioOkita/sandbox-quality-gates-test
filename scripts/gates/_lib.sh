@@ -15,6 +15,18 @@ GATE_PASS=0
 GATE_FAIL=1
 GATE_ERROR=2
 
+# Docker イメージは latest を使わず固定する。リポジトリの依存固定方針と同じ理由（再現性）に
+# 加えて、ツールの版が変わるとゲートの挙動が黙って変わり、検証結果の意味が失われるため。
+# 以下 3 つは source される側の定数のため shellcheck は利用箇所を追えない（SC2034 は偽陽性）。
+# GATE_IMG_SEMGREP は l2-semgrep.sh、GATE_IMG_OSV は l2-osv.sh、GATE_IMG_GITLEAKS は
+# l2-gitleaks.sh がそれぞれ参照する。
+# shellcheck disable=SC2034
+GATE_IMG_SEMGREP='semgrep/semgrep:1.171.0'
+# shellcheck disable=SC2034
+GATE_IMG_OSV='ghcr.io/google/osv-scanner:v2.4.0'
+# shellcheck disable=SC2034
+GATE_IMG_GITLEAKS='zricethezav/gitleaks:v8.30.1'
+
 # 指定コマンドが使えなければ error で終了する
 gate_require_cmd() {
   local cmd="$1"
@@ -52,6 +64,20 @@ gate_require_runnable() {
   fi
 }
 
+# Docker が使えることを確認する。使えなければ error で終了する。
+#
+# 設計書 §6.1 が「このハーネス最大の誤判定リスク」と呼ぶのがここである。
+# Docker デーモンが止まっているだけの状態を「ゲートが欠陥を検出した」と記録すると、
+# 検証結果そのものが無意味になる。docker コマンドの存在だけでは足りない。
+# デーモンが止まっていても docker バイナリは在り、run は非ゼロで落ちる。
+gate_require_docker() {
+  gate_require_cmd docker
+  if ! docker info >/dev/null 2>&1; then
+    printf 'gate error: Docker デーモンが起動していません（Docker Desktop を起動してください）\n' >&2
+    exit "$GATE_ERROR"
+  fi
+}
+
 # 生 exit code を 3 値へ正規化して終了する。
 #   $1        生 exit code
 #   $2 以降   fail とみなす生 exit code（列挙）
@@ -69,5 +95,24 @@ gate_finish() {
     fi
   done
   printf 'gate error: 予期しない exit code: %s\n' "$raw" >&2
+  exit "$GATE_ERROR"
+}
+
+# ツールの非ゼロ終了を「欠陥の検出」と「ツールが実行できなかった」に切り分ける。
+#   $1  ログファイルのパス
+#   $2  fail と判定する正規表現（grep -E）
+# 一致すれば fail(1)、しなければ error(2)。
+#
+# exit code だけでは切り分けられないツールのために用意する。pnpm は lockfile 不整合も
+# レジストリ到達不能も同じ 1 を返すため、後者を fail と記録すると「ネットワークが
+# 落ちていた」が「架空パッケージを検出した」になる（申し送り #16）。
+gate_fail_if_matches() {
+  local log="$1" pattern="$2"
+  if grep -qE "$pattern" "$log"; then
+    exit "$GATE_FAIL"
+  fi
+  printf 'gate error: 想定した失敗理由がログに見つかりません（パターン: %s）\n' "$pattern" >&2
+  printf '  ツールが実行できなかった可能性があります。ログ全文:\n' >&2
+  cat "$log" >&2
   exit "$GATE_ERROR"
 }

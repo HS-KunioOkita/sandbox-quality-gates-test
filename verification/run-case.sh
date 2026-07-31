@@ -17,7 +17,21 @@
 # RESULTS.md を書くとブランチ削除で消える。
 set -uo pipefail
 
-cd "$(git rev-parse --show-toplevel)"
+# git rev-parse --show-toplevel はリポジトリ外だと exit 128 で標準出力が空になる。
+# ここで `cd "$(...)" || exit 2` の形にしても意味がない。**`cd ""` は bash では
+# exit 0 を返す**（実測。ディレクトリは変わらないが失敗として扱われない）ため、
+# コマンド置換の終了ステータスと空文字列を別々に検査する必要がある。
+# 見逃すと -e を付けていないためスクリプトはそのまま続行し、以降の
+# git checkout -b / git commit / git apply が無関係なディレクトリで走る
+# 事故になりうる（SC2164）。ここで exit 2（error）にする。これは
+# 「ハーネスが実行できなかった」状態であり、ゲートの pass/fail の判定に
+# 使ってはいけないため 0/1 ではなく 2 にする。
+toplevel=$(git rev-parse --show-toplevel) || exit 2
+[ -n "$toplevel" ] || exit 2
+cd "$toplevel" || exit 2
+
+# shellcheck source=scripts/gates/gates.list.sh
+source scripts/gates/gates.list.sh
 
 CASE_ID="${1:-}"
 if [ -z "$CASE_ID" ]; then
@@ -68,6 +82,29 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# git apply --index の後、git commit の前に失敗したときの後始末。
+#
+# この時点で BRANCH は BASE_BRANCH とまだ同じコミットを指している（新規コミットが
+# 無い）。cleanup の `git checkout "$BASE_BRANCH"` は、通常なら「未コミットの変更が
+# あるチェックアウト」として失敗するはずだが、ここでは異なる：チェックアウト元と
+# チェックアウト先が同一コミットなので、git はステージ済み/未ステージの変更を
+# 「持ち越し」として扱い、checkout はそのまま成功してしまう。branch -D も同じ理由で
+# 成功する。結果、ユーザーは実ブランチ（BASE_BRANCH）に欠陥パッチがステージされた
+# 状態で取り残され、cleanup 側にはそれを検知する手段が無い（BASE_BRANCH と BRANCH が
+# 同一コミットである、という一致自体は正常系でも起きるため、これだけでは異常の
+# シグナルにならない）。
+#
+# reset --hard で戻して良い理由:
+#   (1) run-case.sh 冒頭のクリーンチェックで、パッチ適用前の作業ツリーは
+#       クリーンだったことを確認済み
+#   (2) ここまでに変更が入ったのはハーネスが直前に作った検証用ブランチ (BRANCH) 上
+#       だけで、まだ新規コミットは無い
+# したがって reset --hard が戻すのは「ハーネス自身がこの実行で入れた変更」に限られ、
+# ユーザーの作業を破壊する余地は無い。
+restore_verify_worktree() {
+  git reset --hard --quiet HEAD 2>/dev/null || true
+}
+
 # 失敗を見逃すと、ユーザーの実ブランチ上で git apply と git commit が行われる。
 if ! git checkout --quiet -b "$BRANCH"; then
   printf 'エラー: 検証ブランチ %s を作成できませんでした\n' "$BRANCH" >&2
@@ -77,15 +114,21 @@ fi
 if ! git apply --index "$CASE_DIR/case.patch" 2>"$LOGS/apply.log"; then
   printf 'エラー: パッチが適用できません。case.patch の更新が必要です\n' >&2
   cat "$LOGS/apply.log" >&2
+  restore_verify_worktree
   exit 2
 fi
 if ! git commit --quiet -m "verify: $CASE_ID"; then
   printf 'エラー: 検証コミットに失敗しました\n' >&2
+  restore_verify_worktree
   exit 2
 fi
 
 # ゲートを実行する。l2-install は必ず先。依存が無ければ他が動かないため、
 # また install 失敗による連鎖失敗を「ゲートが欠陥を検出した」と誤記録しないため。
+#
+# TSV は 4 列: <ゲート名> <exit code> <detected> <summary>
+# summary は tr -d '\t' でタブを除いているが、列の追加時に破綻しないよう
+# 防御的に最後に置く。
 run_gate() {
   local gate="$1"
   local log="$LOGS/$gate.log"
@@ -93,16 +136,45 @@ run_gate() {
   local code=$?
   local summary
   summary=$(tail -n 1 "$log" | tr -d '\t' | cut -c1-120)
-  printf '%s\t%s\t%s\n' "$gate" "$code" "$summary" >>"$ACTUAL"
+  printf '%s\t%s\t-\t%s\n' "$gate" "$code" "$summary" >>"$ACTUAL"
   return "$code"
 }
 
-if ! run_gate l2-install; then
-  printf 'l2-install が pass しなかったため後続ゲートを打ち切りました\n' >&2
+# 非ブロックゲートを実行する。exit code ではなく出力の marker で判定する
+# （設計書 §8.1）。exit 2 は「実行できなかった」なので detected を決めない。
+run_detection_gate() {
+  local gate="$1"
+  local log="$LOGS/$gate.log"
+  "./scripts/gates/$gate.sh" >"$log" 2>&1
+  local code=$?
+  local detected=false
+  if grep -q 'NEW_DEPENDENCY_DETECTED' "$log"; then
+    detected=true
+  fi
+  local summary
+  summary=$(tail -n 1 "$log" | tr -d '\t' | cut -c1-120)
+  printf '%s\t%s\t%s\t%s\n' "$gate" "$code" "$detected" "$summary" >>"$ACTUAL"
+}
+
+# 非ブロックゲートは元ブランチとの差分を見るので、比較対象を渡す。
+export GATE_BASE_REF="$BASE_BRANCH"
+
+if ! run_gate "${GATE_ORDER[0]}"; then
+  printf '%s が pass しなかったため後続のブロックゲートを打ち切りました\n' "${GATE_ORDER[0]}" >&2
 else
-  run_gate l1-typecheck || true
-  run_gate l1-lint || true
+  for gate in "${GATE_ORDER[@]:1}"; do
+    run_gate "$gate" || true
+  done
 fi
+
+# 非ブロックゲートは l2-install の成否に関わらず実行する。
+# 打ち切りの理由は「依存が無いことによる連鎖失敗を『ゲートが欠陥を検出した』と
+# 誤記録しないため」（設計書 §8.2）だが、非ブロックゲートは exit code で欠陥を
+# 主張しないのでその危険がない。l2-new-deps は git の差分しか見ず node_modules も
+# 要らないので、install が失敗した状態でも正しい検出結果を出せる。
+for gate in "${GATE_DETECTION[@]}"; do
+  run_detection_gate "$gate"
+done
 
 cleanup
 
@@ -118,6 +190,20 @@ if [ "$(git rev-parse --abbrev-ref HEAD)" != "$BASE_BRANCH" ] \
   git status --short >&2
   exit 2
 fi
+
+# node_modules を元ブランチの状態に戻す。
+#
+# ゲートは検証ブランチの package.json / pnpm-lock.yaml で pnpm install を走らせるので、
+# node_modules は検証ブランチの状態のまま元ブランチへ持ち越される。L2-01 と L2-04 は
+# 依存を触るため、戻さないと次のケースが汚染された node_modules の上で走る。
+# run-all.sh の対照実行は先頭で 1 回しか取らないのでこれを検出できない（申し送り #17）。
+if ! pnpm install --frozen-lockfile --ignore-scripts >"$LOGS/restore.log" 2>&1; then
+  printf 'エラー: node_modules を %s の状態へ戻せませんでした\n' "$BASE_BRANCH" >&2
+  printf '  復旧: pnpm install --frozen-lockfile\n' >&2
+  tail -n 20 "$LOGS/restore.log" >&2
+  exit 2
+fi
+
 trap - EXIT
 
 node verification/lib/judge.mjs "$CASE_DIR/expect.yml" "$ACTUAL"
