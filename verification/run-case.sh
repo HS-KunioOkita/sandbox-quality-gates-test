@@ -17,12 +17,18 @@
 # RESULTS.md を書くとブランチ削除で消える。
 set -uo pipefail
 
-# git rev-parse --show-toplevel が失敗すると空文字列になり、cd "" も失敗する。
-# -e を付けていないためスクリプトはそのまま続行し、以降の git checkout -b /
-# git commit / git apply が無関係なディレクトリで走る事故になりうる（SC2164）。
-# ここで exit 2（error）にする。これは「ハーネスが実行できなかった」状態であり、
-# ゲートの pass/fail の判定に使ってはいけないため 0/1 ではなく 2 にする。
-cd "$(git rev-parse --show-toplevel)" || exit 2
+# git rev-parse --show-toplevel はリポジトリ外だと exit 128 で標準出力が空になる。
+# ここで `cd "$(...)" || exit 2` の形にしても意味がない。**`cd ""` は bash では
+# exit 0 を返す**（実測。ディレクトリは変わらないが失敗として扱われない）ため、
+# コマンド置換の終了ステータスと空文字列を別々に検査する必要がある。
+# 見逃すと -e を付けていないためスクリプトはそのまま続行し、以降の
+# git checkout -b / git commit / git apply が無関係なディレクトリで走る
+# 事故になりうる（SC2164）。ここで exit 2（error）にする。これは
+# 「ハーネスが実行できなかった」状態であり、ゲートの pass/fail の判定に
+# 使ってはいけないため 0/1 ではなく 2 にする。
+toplevel=$(git rev-parse --show-toplevel) || exit 2
+[ -n "$toplevel" ] || exit 2
+cd "$toplevel" || exit 2
 
 # shellcheck source=scripts/gates/gates.list.sh
 source scripts/gates/gates.list.sh
@@ -96,7 +102,8 @@ fi
 # また install 失敗による連鎖失敗を「ゲートが欠陥を検出した」と誤記録しないため。
 #
 # TSV は 4 列: <ゲート名> <exit code> <detected> <summary>
-# summary はタブを含みうるので必ず最後に置く。
+# summary は tr -d '\t' でタブを除いているが、列の追加時に破綻しないよう
+# 防御的に最後に置く。
 run_gate() {
   local gate="$1"
   local log="$LOGS/$gate.log"
@@ -128,15 +135,21 @@ run_detection_gate() {
 export GATE_BASE_REF="$BASE_BRANCH"
 
 if ! run_gate "${GATE_ORDER[0]}"; then
-  printf '%s が pass しなかったため後続ゲートを打ち切りました\n' "${GATE_ORDER[0]}" >&2
+  printf '%s が pass しなかったため後続のブロックゲートを打ち切りました\n' "${GATE_ORDER[0]}" >&2
 else
   for gate in "${GATE_ORDER[@]:1}"; do
     run_gate "$gate" || true
   done
-  for gate in "${GATE_DETECTION[@]}"; do
-    run_detection_gate "$gate"
-  done
 fi
+
+# 非ブロックゲートは l2-install の成否に関わらず実行する。
+# 打ち切りの理由は「依存が無いことによる連鎖失敗を『ゲートが欠陥を検出した』と
+# 誤記録しないため」（設計書 §8.2）だが、非ブロックゲートは exit code で欠陥を
+# 主張しないのでその危険がない。l2-new-deps は git の差分しか見ず node_modules も
+# 要らないので、install が失敗した状態でも正しい検出結果を出せる。
+for gate in "${GATE_DETECTION[@]}"; do
+  run_detection_gate "$gate"
+done
 
 cleanup
 

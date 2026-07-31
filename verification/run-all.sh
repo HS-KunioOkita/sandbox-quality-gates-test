@@ -2,12 +2,17 @@
 # 全検証ケースを実行し verification/RESULTS.md を生成する。
 set -uo pipefail
 
-# git rev-parse --show-toplevel が失敗すると空文字列になり、cd "" も失敗する。
-# -e を付けていないためスクリプトはそのまま続行し、以降の処理が無関係な
-# ディレクトリで走る事故になりうる（SC2164）。ここで exit 2（error）にする。
-# これは「ハーネスが実行できなかった」状態であり、ゲートの pass/fail の
-# 判定に使ってはいけないため 0/1 ではなく 2 にする。
-cd "$(git rev-parse --show-toplevel)" || exit 2
+# git rev-parse --show-toplevel はリポジトリ外だと exit 128 で標準出力が空になる。
+# ここで `cd "$(...)" || exit 2` の形にしても意味がない。**`cd ""` は bash では
+# exit 0 を返す**（実測。ディレクトリは変わらないが失敗として扱われない）ため、
+# コマンド置換の終了ステータスと空文字列を別々に検査する必要がある。
+# 見逃すと -e を付けていないためスクリプトはそのまま続行し、以降の処理が
+# 無関係なディレクトリで走る事故になりうる（SC2164）。ここで exit 2（error）
+# にする。これは「ハーネスが実行できなかった」状態であり、ゲートの pass/fail
+# の判定に使ってはいけないため 0/1 ではなく 2 にする。
+toplevel=$(git rev-parse --show-toplevel) || exit 2
+[ -n "$toplevel" ] || exit 2
+cd "$toplevel" || exit 2
 
 # shellcheck source=scripts/gates/gates.list.sh
 source scripts/gates/gates.list.sh
