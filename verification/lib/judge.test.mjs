@@ -61,18 +61,28 @@ test('parseExpect は expect の値が pass/fail 以外なら throw する', () 
 });
 
 test('parseActual は TSV を読める', () => {
-  const tsv = 'l2-install\t0\tok\nl1-typecheck\t0\tok\nl1-lint\t1\t3 problems\n';
+  const tsv = 'l2-install\t0\t-\tok\nl1-typecheck\t0\t-\tok\nl1-lint\t1\t-\t3 problems\n';
   assert.deepEqual(parseActual(writeTemp('actual.tsv', tsv)), {
-    'l2-install': { code: 0, summary: 'ok' },
-    'l1-typecheck': { code: 0, summary: 'ok' },
-    'l1-lint': { code: 1, summary: '3 problems' },
+    'l2-install': { code: 0, detected: '-', summary: 'ok' },
+    'l1-typecheck': { code: 0, detected: '-', summary: 'ok' },
+    'l1-lint': { code: 1, detected: '-', summary: '3 problems' },
   });
 });
 
 test('judge は主張どおりの層が止めたとき claimVerdict を match とする', () => {
   const result = judge(
-    { id: 'X', pitfall: 'p', claimedLayer: 'L1', expect: { 'l1-lint': 'fail', 'l1-typecheck': 'pass' } },
-    { 'l1-lint': { code: 1, summary: '' }, 'l1-typecheck': { code: 0, summary: '' } },
+    {
+      id: 'X',
+      pitfall: 'p',
+      claimedLayer: 'L1',
+      claimedGate: '',
+      expect: { 'l1-lint': 'fail', 'l1-typecheck': 'pass' },
+      expectDetection: {},
+    },
+    {
+      'l1-lint': { code: 1, detected: '-', summary: '' },
+      'l1-typecheck': { code: 0, detected: '-', summary: '' },
+    },
   );
   assert.equal(result.claimVerdict, 'match');
   assert.equal(result.configVerdict, 'match');
@@ -83,8 +93,15 @@ test('judge は主張どおりの層が止めたとき claimVerdict を match �
 test('judge は主張と別の層が止めたとき claimVerdict を mismatch とする', () => {
   // 手順書は L2（OSV-Scanner）が止めると主張しているが、実際に止めたのは install だけ
   const result = judge(
-    { id: 'X', pitfall: 'p', claimedLayer: 'L4', expect: { 'l2-install': 'fail' } },
-    { 'l2-install': { code: 1, summary: '' } },
+    {
+      id: 'X',
+      pitfall: 'p',
+      claimedLayer: 'L4',
+      claimedGate: '',
+      expect: { 'l2-install': 'fail' },
+      expectDetection: {},
+    },
+    { 'l2-install': { code: 1, detected: '-', summary: '' } },
   );
   assert.equal(result.claimVerdict, 'mismatch');
   assert.deepEqual(result.blockingLayers, ['L2']);
@@ -92,8 +109,15 @@ test('judge は主張と別の層が止めたとき claimVerdict を mismatch �
 
 test('judge はどのゲートも止めなかったとき claimVerdict を not-caught とする', () => {
   const result = judge(
-    { id: 'X', pitfall: 'p', claimedLayer: 'L1', expect: { 'l1-lint': 'pass' } },
-    { 'l1-lint': { code: 0, summary: '' } },
+    {
+      id: 'X',
+      pitfall: 'p',
+      claimedLayer: 'L1',
+      claimedGate: '',
+      expect: { 'l1-lint': 'pass' },
+      expectDetection: {},
+    },
+    { 'l1-lint': { code: 0, detected: '-', summary: '' } },
   );
   assert.equal(result.claimVerdict, 'not-caught');
   assert.deepEqual(result.blockedBy, []);
@@ -101,8 +125,15 @@ test('judge はどのゲートも止めなかったとき claimVerdict を not-c
 
 test('judge は expect と実測がずれたとき configVerdict を mismatch とする', () => {
   const result = judge(
-    { id: 'X', pitfall: 'p', claimedLayer: 'L1', expect: { 'l1-lint': 'fail' } },
-    { 'l1-lint': { code: 0, summary: '' } },
+    {
+      id: 'X',
+      pitfall: 'p',
+      claimedLayer: 'L1',
+      claimedGate: '',
+      expect: { 'l1-lint': 'fail' },
+      expectDetection: {},
+    },
+    { 'l1-lint': { code: 0, detected: '-', summary: '' } },
   );
   assert.equal(result.configVerdict, 'mismatch');
   assert.deepEqual(result.mismatches, [{ gate: 'l1-lint', expected: 'fail', actual: 'pass' }]);
@@ -110,8 +141,15 @@ test('judge は expect と実測がずれたとき configVerdict を mismatch �
 
 test('judge は error(2) を含むケースを両方 inconclusive とする', () => {
   const result = judge(
-    { id: 'X', pitfall: 'p', claimedLayer: 'L1', expect: { 'l1-lint': 'fail' } },
-    { 'l1-lint': { code: 2, summary: 'docker が起動していない' } },
+    {
+      id: 'X',
+      pitfall: 'p',
+      claimedLayer: 'L1',
+      claimedGate: '',
+      expect: { 'l1-lint': 'fail' },
+      expectDetection: {},
+    },
+    { 'l1-lint': { code: 2, detected: '-', summary: 'docker が起動していない' } },
   );
   assert.equal(result.claimVerdict, 'inconclusive');
   assert.equal(result.configVerdict, 'inconclusive');
@@ -120,9 +158,104 @@ test('judge は error(2) を含むケースを両方 inconclusive とする', ()
 
 test('judge は複数の層が止めた場合、主張の層が含まれていれば match とする', () => {
   const result = judge(
-    { id: 'X', pitfall: 'p', claimedLayer: 'L1', expect: { 'l1-typecheck': 'fail', 'l1-lint': 'fail' } },
-    { 'l1-typecheck': { code: 1, summary: '' }, 'l1-lint': { code: 1, summary: '' } },
+    {
+      id: 'X',
+      pitfall: 'p',
+      claimedLayer: 'L1',
+      claimedGate: '',
+      expect: { 'l1-typecheck': 'fail', 'l1-lint': 'fail' },
+      expectDetection: {},
+    },
+    {
+      'l1-typecheck': { code: 1, detected: '-', summary: '' },
+      'l1-lint': { code: 1, detected: '-', summary: '' },
+    },
   );
   assert.equal(result.claimVerdict, 'match');
   assert.deepEqual(result.blockingLayers, ['L1']);
+});
+
+test('claimed_gate が指定され、そのゲートが止めたら claimGateVerdict は match', () => {
+  const expected = {
+    id: 'X', pitfall: 'p', claimedLayer: 'L2', claimedGate: 'l2-osv',
+    expect: { 'l2-osv': 'fail' }, expectDetection: {},
+  };
+  const actual = { 'l2-osv': { code: 1, detected: '-', summary: '' } };
+  const r = judge(expected, actual);
+  assert.equal(r.claimVerdict, 'match');
+  assert.equal(r.claimGateVerdict, 'match');
+});
+
+test('claimed_gate が指定され、同じ層の別ゲートが止めたら claimGateVerdict は mismatch', () => {
+  const expected = {
+    id: 'X', pitfall: 'p', claimedLayer: 'L2', claimedGate: 'l2-osv',
+    expect: { 'l2-install': 'fail' }, expectDetection: {},
+  };
+  const actual = { 'l2-install': { code: 1, detected: '-', summary: '' } };
+  const r = judge(expected, actual);
+  assert.equal(r.claimVerdict, 'match', '層としては L2 が止めているので match');
+  assert.equal(r.claimGateVerdict, 'mismatch', '名指しされた l2-osv は止めていない');
+});
+
+test('claimed_gate が無ければ claimGateVerdict は n/a', () => {
+  const expected = {
+    id: 'X', pitfall: 'p', claimedLayer: 'L1', claimedGate: '',
+    expect: { 'l1-lint': 'fail' }, expectDetection: {},
+  };
+  const actual = { 'l1-lint': { code: 1, detected: '-', summary: '' } };
+  assert.equal(judge(expected, actual).claimGateVerdict, 'n/a');
+});
+
+test('expect_detection と実測がずれたら configVerdict は mismatch', () => {
+  const expected = {
+    id: 'X', pitfall: 'p', claimedLayer: 'L2', claimedGate: '',
+    expect: { 'l1-lint': 'pass' }, expectDetection: { 'l2-new-deps': true },
+  };
+  const actual = {
+    'l1-lint': { code: 0, detected: '-', summary: '' },
+    'l2-new-deps': { code: 0, detected: 'false', summary: '' },
+  };
+  const r = judge(expected, actual);
+  assert.equal(r.configVerdict, 'mismatch');
+  assert.deepEqual(r.detectionMismatches, [
+    { gate: 'l2-new-deps', expected: true, actual: false },
+  ]);
+});
+
+test('非ブロックゲートは fail しないので blockedBy に入らない', () => {
+  const expected = {
+    id: 'X', pitfall: 'p', claimedLayer: 'L2', claimedGate: '',
+    expect: {}, expectDetection: { 'l2-new-deps': true },
+  };
+  const actual = { 'l2-new-deps': { code: 0, detected: 'true', summary: '' } };
+  const r = judge(expected, actual);
+  assert.deepEqual(r.blockedBy, []);
+  assert.equal(r.claimVerdict, 'not-caught');
+});
+
+test('非ブロックゲートが error(2) なら inconclusive', () => {
+  const expected = {
+    id: 'X', pitfall: 'p', claimedLayer: 'L2', claimedGate: '',
+    expect: { 'l1-lint': 'pass' }, expectDetection: { 'l2-new-deps': true },
+  };
+  const actual = {
+    'l1-lint': { code: 0, detected: '-', summary: '' },
+    'l2-new-deps': { code: 2, detected: 'false', summary: '' },
+  };
+  assert.equal(judge(expected, actual).claimVerdict, 'inconclusive');
+});
+
+test('parseActual は 4 列 TSV を読む', () => {
+  const p = writeTemp('actual.tsv', 'a\t1\t-\tsummary with\ttab\nb\t0\ttrue\tok\n');
+  const r = parseActual(p);
+  assert.deepEqual(r.a, { code: 1, detected: '-', summary: 'summary with\ttab' });
+  assert.deepEqual(r.b, { code: 0, detected: 'true', summary: 'ok' });
+});
+
+test('claimed_gate の層が claimed_layer と食い違ったら throw', () => {
+  const p = writeTemp(
+    'expect.yml',
+    'id: X\npitfall: p\nclaimed_layer: L2\nclaimed_gate: l1-lint\nexpect:\n  l1-lint: fail\n',
+  );
+  assert.throws(() => parseExpect(p), /claimed_gate/);
 });

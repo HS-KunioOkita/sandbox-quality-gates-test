@@ -60,7 +60,12 @@ done
   printf '  意図したルールが発火したのか、パッチが誘発した別の違反で落ちたのかを区別しない。\n'
   printf '  同じ層で止まる複数のケース（例: L1-01 と L1-02）は観測上まったく同一になる。\n'
   printf -- '- **因果は保証していない。** ゲートが赤くなったことと、それがパッチのせいであることは\n'
-  printf '  別である。対照実行はこの隙間を狭めるが、閉じはしない。\n\n'
+  printf '  別である。対照実行はこの隙間を狭めるが、閉じはしない。\n'
+  printf -- '- **ゲート単位までは見るが、ルール単位は見ていない。** 手順書がツール名を名指ししている\n'
+  # 同上（Markdown のコードスパン表記。展開させない意図）
+  # shellcheck disable=SC2016
+  printf '  ケースは `claimed_gate` で照合するので「層は一致したが名指しされたツールは無反応」を\n'
+  printf '  区別できる。ただし同じゲート内でどのルールが落としたかは区別しない。\n\n'
   printf '| ケース | 落とし穴 | 手順書の主張 | 実際に止めた層 | 判定 |\n'
   printf '|---|---|---|---|---|\n'
 } >"$WORK/head.md"
@@ -78,18 +83,29 @@ for case_dir in verification/cases/*/; do
   # shellcheck disable=SC2016
   node -e '
     const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
-    const mark = {
-      match: "✅ 一致",
-      mismatch: "❌ 別の層が止めた",
-      "not-caught": "❌ どの層も止めなかった",
-      inconclusive: "⚠️ 判定不能",
-    }[r.claimVerdict];
+    let mark;
+    if (r.claimVerdict === "inconclusive") mark = "⚠️ 判定不能";
+    else if (r.claimVerdict === "not-caught") mark = "❌ どの層も止めなかった";
+    else if (r.claimVerdict === "mismatch") mark = "❌ 別の層が止めた";
+    else if (r.claimGateVerdict === "mismatch") mark = "❌ 層は一致・主張したツールは無反応";
+    else mark = "✅ 一致";
     const blocked = r.blockedBy.length > 0 ? r.blockedBy.join(", ") : "（なし）";
+    // 手順書がツール名まで名指ししているケースは、その名前も併記する
+    const claim = r.expected.claimedGate
+      ? `${r.expected.claimedLayer} (${r.expected.claimedGate})`
+      : r.expected.claimedLayer;
     // 設定の回帰（expect と実測のずれ）は本題ではないので注記として添える
-    const note = r.configVerdict === "mismatch"
-      ? " ※設定ずれ: " + r.mismatches.map(m => `${m.gate} 期待 ${m.expected} → 実測 ${m.actual}`).join(" / ")
-      : "";
-    process.stdout.write(`| ${r.expected.id} | ${r.expected.pitfall} | ${r.expected.claimedLayer} | ${blocked} | ${mark}${note} |\n`);
+    const notes = [];
+    if (r.mismatches.length > 0) {
+      notes.push(r.mismatches.map(m => `${m.gate} 期待 ${m.expected} → 実測 ${m.actual}`).join(" / "));
+    }
+    if (r.detectionMismatches.length > 0) {
+      notes.push(r.detectionMismatches.map(m => `${m.gate} 検出 期待 ${m.expected} → 実測 ${m.actual}`).join(" / "));
+    }
+    const note = notes.length > 0 ? " ※設定ずれ: " + notes.join(" / ") : "";
+    // pitfall や注記に | が入ると Markdown の表が壊れるのでエスケープする
+    const esc = (s) => String(s).replace(/\|/g, "\\|");
+    process.stdout.write(`| ${esc(r.expected.id)} | ${esc(r.expected.pitfall)} | ${esc(claim)} | ${esc(blocked)} | ${esc(mark + note)} |\n`);
   ' "$WORK/$case_id.json" >>"$WORK/rows.md"
 done
 
