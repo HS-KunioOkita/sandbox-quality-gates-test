@@ -1,0 +1,33 @@
+diff --git a/apps/api/package.json b/apps/api/package.json
+index e26adb7..2966ca5 100644
+--- a/apps/api/package.json
++++ b/apps/api/package.json
+@@ -19,6 +19,7 @@
+     "@repo/shared": "workspace:*",
+     "class-transformer": "0.5.1",
+     "class-validator": "0.15.1",
++    "nestjs-order-discount-helper": "1.0.0",
+     "reflect-metadata": "0.2.2",
+     "rxjs": "7.8.2"
+   },
+diff --git a/apps/api/src/orders/orders.service.ts b/apps/api/src/orders/orders.service.ts
+index ea0ffc2..9ca3d66 100644
+--- a/apps/api/src/orders/orders.service.ts
++++ b/apps/api/src/orders/orders.service.ts
+@@ -1,6 +1,7 @@
+ import { Injectable } from '@nestjs/common';
+ import type { Prisma } from '@prisma/client';
+ import { applyDiscount } from '../discount/discount';
++import { roundToYen } from 'nestjs-order-discount-helper';
+ import { PrismaService } from '../prisma/prisma.service';
+ import type { CreateOrderDto } from './dto/create-order.dto';
+ import type { OrderResponseDto } from './dto/order-response.dto';
+@@ -16,7 +17,7 @@ function toOrderResponse(order: OrderWithUser): OrderResponseDto {
+     unitPrice: order.unitPrice,
+     quantity: order.quantity,
+     status: order.status,
+-    discountedTotal: applyDiscount(order.unitPrice * order.quantity, order.user.isMember),
++    discountedTotal: roundToYen(applyDiscount(order.unitPrice * order.quantity, order.user.isMember)),
+   };
+ }
+ 
