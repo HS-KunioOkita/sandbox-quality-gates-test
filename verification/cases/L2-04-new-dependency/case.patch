@@ -1,0 +1,76 @@
+diff --git a/apps/api/package.json b/apps/api/package.json
+index e26adb7..4ed10bb 100644
+--- a/apps/api/package.json
++++ b/apps/api/package.json
+@@ -19,6 +19,7 @@
+     "@repo/shared": "workspace:*",
+     "class-transformer": "0.5.1",
+     "class-validator": "0.15.1",
++    "dayjs": "1.11.21",
+     "reflect-metadata": "0.2.2",
+     "rxjs": "7.8.2"
+   },
+diff --git a/apps/api/src/orders/orders.service.ts b/apps/api/src/orders/orders.service.ts
+index ea0ffc2..9d9bda5 100644
+--- a/apps/api/src/orders/orders.service.ts
++++ b/apps/api/src/orders/orders.service.ts
+@@ -1,5 +1,6 @@
+ import { Injectable } from '@nestjs/common';
+ import type { Prisma } from '@prisma/client';
++import dayjs from 'dayjs';
+ import { applyDiscount } from '../discount/discount';
+ import { PrismaService } from '../prisma/prisma.service';
+ import type { CreateOrderDto } from './dto/create-order.dto';
+@@ -8,6 +9,9 @@ import type { OrderResponseDto } from './dto/order-response.dto';
+ /** user を include して取得した Order */
+ type OrderWithUser = Prisma.OrderGetPayload<{ include: { user: true } }>;
+ 
++/** 起点時刻の目印（dayjs の利用箇所） */
++const EPOCH_STAMP = dayjs(0).toISOString();
++
+ /** 取得した注文をレスポンス形へ変換し、会員割引を適用した合計を載せる */
+ function toOrderResponse(order: OrderWithUser): OrderResponseDto {
+   return {
+@@ -22,6 +26,9 @@ function toOrderResponse(order: OrderWithUser): OrderResponseDto {
+ 
+ @Injectable()
+ export class OrdersService {
++  /** 起点時刻の目印 */
++  readonly epochStamp = EPOCH_STAMP;
++
+   constructor(private readonly prisma: PrismaService) {}
+ 
+   /** 指定ユーザーの注文一覧を、会員割引を適用した合計付きで返す */
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index 0fd5823..8038b17 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -50,6 +50,9 @@ importers:
+       class-validator:
+         specifier: 0.15.1
+         version: 0.15.1
++      dayjs:
++        specifier: 1.11.21
++        version: 1.11.21
+       reflect-metadata:
+         specifier: 0.2.2
+         version: 0.2.2
+@@ -1549,6 +1552,9 @@ packages:
+     resolution: {integrity: sha512-BS8PfmtDGnrgYdOonGZQdLZslWIeCGFP9tpan0hi1Co2Zr2NKADsvGYA8XxuG/4UWgJ6Cjtv+YJnB6MM69QGlQ==}
+     engines: {node: '>= 0.4'}
+ 
++  dayjs@1.11.21:
++    resolution: {integrity: sha512-98IT+HOahAisibz/yjKbzuOBwYcjJ7BCLPzARyHiyEBmRz4fatF+KPJszEHXsGYjUG234aH/cOjW1wwTbKUZlA==}
++
+   debug@4.4.3:
+     resolution: {integrity: sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA==}
+     engines: {node: '>=6.0'}
+@@ -5015,6 +5021,8 @@ snapshots:
+       es-errors: 1.3.0
+       is-data-view: 1.0.2
+ 
++  dayjs@1.11.21: {}
++
+   debug@4.4.3:
+     dependencies:
+       ms: 2.1.3

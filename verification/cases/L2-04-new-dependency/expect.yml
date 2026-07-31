@@ -1,0 +1,15 @@
+id: L2-04-new-dependency
+pitfall: 実在する新規依存を追加する
+claimed_layer: L2
+# 手順書 §3.3 の末尾は「新規依存の追加は人間承認を必須にする」と述べ、
+# 検出のみでブロックしない運用を示している。
+claimed_gate: l2-new-deps
+expect:
+  l2-install: pass
+  l1-typecheck: pass
+  l1-lint: pass
+  l2-semgrep: pass
+  l2-osv: pass
+  l2-gitleaks: pass
+expect_detection:
+  l2-new-deps: true
