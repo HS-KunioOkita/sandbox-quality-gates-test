@@ -528,6 +528,8 @@ Phase 0 の API は `GET /orders`（自分の一覧のみ）と `POST /orders` �
 
 Phase 3 で **(a)** `GET /orders/:id` を追加して所有者チェックを入れるか、**(b)** ケースの期待値を書き換えるかを選ぶ。
 
+**Phase 3 着手時の決定：(a) を選択。** 他人の注文には 403 を返す `GET /orders/:id` を追加し、`case.patch` は `@UseGuards` を残したまま所有者チェックだけを外す。`claimed_layer` は手順書 §10 の主張どおり `L2` に置く。詳細は設計書 §9 の同ケースの注記を参照。
+
 なお `@UseGuards` を外すと `request.userId` が実行時 `undefined` になり、Prisma が `where: { userId: undefined }` を「条件なし」と解釈して**全ユーザーの注文を返す**。型チェックでも既存の単体テストでも捕まらないため、`L2-02-guard-missing`（Semgrep カスタムルール＝仮説 5）の検証対象としては理想的な形になっている。
 
 ### 2.2 `L5-02-n-plus-one` — L3 も赤になるため「L1〜L4 全緑」を満たさない
