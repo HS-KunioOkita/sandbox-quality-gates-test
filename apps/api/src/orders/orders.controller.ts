@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
 import { AuthGuard, type AuthenticatedRequest } from '../auth/auth.guard';
 import { CreateOrderDto } from './dto/create-order.dto';
 import type { OrderResponseDto } from './dto/order-response.dto';
@@ -22,5 +22,14 @@ export class OrdersController {
     @Body() dto: CreateOrderDto,
   ): Promise<OrderResponseDto> {
     return this.ordersService.create(request.userId, dto);
+  }
+
+  /** 認証済みユーザー自身の注文を 1 件取得 */
+  @Get(':id')
+  findOne(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') id: string,
+  ): Promise<OrderResponseDto> {
+    return this.ordersService.findOneForUser(request.userId, id);
   }
 }

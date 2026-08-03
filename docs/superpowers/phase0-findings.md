@@ -574,6 +574,30 @@ FAIL integration test/orders.int-spec.ts (7.93 s)
 
 手順書への修正提案は 3 点。(1) §4.2 に `prisma migrate deploy` の適用を明記する。(2) その際 `env` へ `DATABASE_URL` を明示的に渡す必要があること（`.env` のローカル DB を巻き込む事故を避けるため）を併記する。(3) §4.1 に、`testMatch` と `setupFilesAfterEnv` を種別ごとの `projects` に分ける具体的な `jest.config.ts` の配線例を示す。
 
+### 1.30 申し送り #12（`create` が存在しないユーザー ID で 500 を返す）を解消。500 を実測してから直した
+
+`apps/api/test/orders.e2e-spec.ts` の「存在しないユーザーの注文作成は 400 を返す」テストを、`OrdersService.create` に FK 違反のハンドリングを足す前に実行し、**申し送り #12 のとおり 500 になることを実測した**。
+
+```
+[Nest] ERROR [ExceptionsHandler] PrismaClientKnownRequestError:
+Invalid `this.prisma.order.create()` invocation in
+.../apps/api/src/orders/orders.service.ts:40:43
+Foreign key constraint violated on the constraint: `Order_userId_fkey`
+  code: 'P2003',
+  meta: { modelName: 'Order', constraint: 'Order_userId_fkey' },
+
+FAIL e2e test/orders.e2e-spec.ts
+  ● Orders (e2e) › 存在しないユーザーの注文作成は 400 を返す
+    Expected: 400
+    Received: 500
+```
+
+同じ実行で `GET /orders/:id` 関連の 2 件（自分の注文 200 / 他人の注文 403）も **404** で失敗した（ルートが未実装なので Nest の既定 404 に落ちる）。「存在しない注文は 404 を返す」だけは**この時点でも偶然 PASS していた**（ルートが無いことによる 404 であり、実装が正しく 404 を返しているわけではない）。4 件中 3 件 FAIL・1 件 PASS で、事前に立てた期待（`.superpowers/sdd/2026-08-03-phase3-l3-tests/task-3-brief.md` の表）と一致した。
+
+`OrdersService.create` に `try/catch` を足し、`Prisma.PrismaClientKnownRequestError` で `code === 'P2003'` の場合に `BadRequestException` を投げるよう実装したところ、4 件とも PASS した（`Tests: 4 passed, 4 total`）。**「存在しない注文は 404」は実装後に改めて実行し、ルートが実在した上で 404 が返ることを確認済み**（実装前の偶然の PASS とは別の実行結果）。
+
+**手順書 §4 は e2e で NestJS アプリを立てる手順を書いていない。** `apps/api/test/orders.e2e-spec.ts` では `Test.createTestingModule({ imports: [AppModule] }).compile()` の後、`main.ts` の `bootstrap` と同じ `ValidationPipe`（`whitelist: true, forbidNonWhitelisted: true, transform: true`）を `app.useGlobalPipes` で明示的に張り直している。ここを揃えないと、**e2e は本番と違う入力検証の下で走ることになる**。具体的には、`main.ts` 側だけに `ValidationPipe` があり e2e 側に無い場合、e2e は許可されるべきでない余分なフィールドや型が合わない値を通してしまい、「テストは緑だが本番は守られていない」（このリポジトリが繰り返し観測している型）を新たに作りうる。手順書への修正提案候補: §4 に e2e アプリのブートストラップ手順（`createNestApplication` 後に `main.ts` と同じグローバルパイプ・フィルタを再設定する必要があること）を明記する。
+
 ---
 
 ## 2. 検証ケースの期待値に対する申し送り
