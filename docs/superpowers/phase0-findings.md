@@ -637,6 +637,50 @@ Shrunk 11 time(s)
 
 修正確認後、`discount.ts` は `git checkout` で元の実装（`Math.floor(price * (1 - MEMBER_DISCOUNT_RATE))`）に復元し、`pnpm --filter api exec jest --selectProjects unit` を再実行して 20 件全て PASS することを確認した。
 
+### 1.32 手順書 §4.4（OpenAPI 型生成・drift 検出）が書いていない前提が 3 つ
+
+`@nestjs/swagger` で OpenAPI ドキュメントを組み立て、`openapi-typescript` で型を生成し、生成物の差分で drift を検出する——という手順書 §4.4 の骨子自体は動く。ただし実装する過程で、手順書が触れていない前提が 3 つ見つかった。
+
+**(1) DTO が `class` である必要に触れていない。** `@nestjs/swagger` は実行時のデコレータメタデータ（`@ApiProperty`）からスキーマを組み立てる。`interface` は型消去で実行時に何も残らないため、DTO を `interface` のまま `@nestjs/swagger` に渡しても **OpenAPI に項目が 1 つも出ない**。この状態でも `openapi-typescript` は空の `schemas: {}` を素直に型化し、`git diff --exit-code` は差分ゼロで通るので、**drift ゲートは「差分なし」で緑になる**。§1.13 が繰り返し指摘してきた「ゲートが緑」と「ゲートが守っている」が区別できなくなる典型例が、また別の層で再現した。実装では `OrderResponseDto` / `CreateOrderDto` を `class` に変え、各フィールドに `@ApiProperty()` を、各ハンドラに `@ApiOkResponse({ type: ... })` を付けて解消した。
+
+**(2) drift ゲート自身が作業ツリーを汚す。** 手順書 §4.4 ③ の「型を再生成して差分を見る」コマンドは、そのまま実行すると追跡ファイル（`apps/web/src/api/schema.d.ts`）を書き換える。検証ハーネス（`run-case.sh`）は検証ブランチから元ブランチへ `git checkout` で戻るので、ゲートが汚したまま終わるとその復帰が失敗し、ケース全体が exit 2 になる。手順書はゲートが生成物を書き換える点にも、それが検証ハーネスの復帰処理と衝突する点にも触れていない。`l3-openapi-drift.sh` では `trap restore_schema EXIT` で判定後に必ず `git checkout -- "$SCHEMA"` を実行し、pass / fail いずれの経路でも作業ツリーを元に戻すことで解消した（クリーンなツリーで実行 → `exit=0` かつ `git status --porcelain` が空、DTO を変えて赤確認 → `exit=1` かつ `git status --porcelain` に `schema.d.ts` が出ないことを実測で確認済み）。
+
+**(3) `openapi.json` の出力先を追跡するかどうかに触れていない。** 手順書は `openapi.json` をリポジトリルートに出力する例を示すが、これを Git 管理下に置くかどうかには触れていない。生成物をコミット対象にすると、生成のたびに無意味な差分が発生し続ける（`schema.d.ts` の drift 検出とは別に、`openapi.json` 自体の drift も気にする羽目になる）。今回は `.gitignore` に `openapi.json` を追加し、差分検出の対象は `schema.d.ts`（`openapi-typescript` の生成物）だけに絞った。
+
+### 1.33 `@nestjs/swagger` を devDependency に入れる手順書の指示は本番ビルドで壊れる候補
+
+手順書 §4.4 は `pnpm add -D --filter api @nestjs/swagger` と、devDependency としての追加を指示する。しかし `@ApiProperty` / `@ApiOkResponse` はデコレータであり、**クラス定義時（モジュール読み込み時）に無条件で実行される**。OpenAPI 生成 CLI（`src/openapi.ts`）を呼ばなくても、DTO や controller を含むモジュールを import する限り `@nestjs/swagger` の実行時解決が必要になる。つまり `@nestjs/swagger` は実質的に本番ランタイムの依存であり、`pnpm install --prod`（devDependency を除外するインストール）で本番イメージを組むと、アプリ起動時に `Cannot find module '@nestjs/swagger'` で落ちる可能性が高い。手順書 §4.4 の `pnpm add -D` という指示はこの点に触れていない。
+
+なお本検証のハーネス（`l2-install.sh`）は `--ignore-scripts` のみを使い `--prod` は使わないため、今回の検証結果そのものには影響していない。本番デプロイの手順を組む段になって初めて表面化する種類の問題である。
+
+### 1.34 L3 の導入手順が L2 のゲートを赤くする、層をまたぐ相互作用（js-yaml の High 脆弱性）
+
+手順書 §4.4 が指示する 2 つのパッケージ（`@nestjs/swagger@11.4.6` / `openapi-typescript@7.13.0`）を追加したところ、無関係のはずの L2 ゲート（`l2-osv`、OSV-Scanner）が赤くなった。
+
+```
+| https://osv.dev/GHSA-52cp-r559-cp3m | 7.5 | npm | js-yaml | 4.2.0 | 4.3.0 |
+| https://osv.dev/GHSA-pm4m-ph32-ghv5 | 7.5 | npm | js-yaml | 5.2.1 | 5.2.2 |
+```
+
+経路（`pnpm why js-yaml` で確認）:
+
+```
+js-yaml@4.2.0 ← @redocly/openapi-core@1.34.17 ← openapi-typescript@7.13.0（web の devDependencies）
+js-yaml@5.2.1 ← @nestjs/swagger@11.4.6（api の devDependencies）
+```
+
+手順書 §10 は L1〜L5 を独立した層として並べているが、**L3（契約テスト）の導入手順が、無関係な L2（依存の脆弱性スキャン）のゲートを赤くする**という、層をまたぐ相互作用が実際に起きた。§1.27 は「層の割り当てが排他的かどうか」を扱ったが、今回のものは割り当ての排他性ではなく、**ある層の導入作業が別の層の判定結果を変える**という、また別種の層間依存である。
+
+対処は `pnpm-workspace.yaml` の `overrides` で修正版に固定した。ただし単純に 1 バージョンへ集約する（§1.19 で `brace-expansion` に使った手法）のは今回は使えない。**このリポジトリには js-yaml が 3 系統（3.15.0 は jest 経由で無関係、4.2.0、5.2.1）存在し、メジャーバージョンが異なるため API 互換性がなく、1 本に集約できない。** pnpm の `overrides` はキーに `@<range>` を付けると「その range を要求している依存元だけ」に適用範囲を絞れる（`js-yaml@4` は 4.x を要求する依存元にのみ適用され、3.x / 5.x には影響しない）ため、系統ごとに個別の修正版を当てた。
+
+```yaml
+overrides:
+  js-yaml@4: 4.3.0
+  js-yaml@5: 5.2.2
+```
+
+適用後、`pnpm why js-yaml` で 3.15.0 / 4.3.0 / 5.2.2 の 3 系統に分かれていること、`./scripts/gates/l2-osv.sh` が `No issues found` で `exit=0` に戻ることを確認した。`pnpm turbo test` / `pnpm turbo typecheck` / `pnpm lint` / `./scripts/gates/l3-openapi-drift.sh`（drift なし、`exit=0`）も再実行し、バージョン変更による回帰が無いことを確認済み。
+
 ---
 
 ## 2. 検証ケースの期待値に対する申し送り

@@ -14,9 +14,9 @@ allowBuilds:
 # 供給網対策。semgrep の p/nodejs が要求する 3 つ（実測で findings として挙がった）。
 # 手順書 §3.3 は「架空パッケージ・供給網対策」を掲げながら pnpm 側のこれらの設定に
 # 触れていない。§1 の修正提案として記録する。
-blockExoticSubdeps: true # 推移的依存を信頼できない配布元から入れさせない
-minimumReleaseAge: 10080 # 公開から 7 日（分）経っていない版は入れない
-trustPolicy: no-downgrade # 更新でセキュリティ設定が引き下げられるのを防ぐ
+blockExoticSubdeps: true      # 推移的依存を信頼できない配布元から入れさせない
+minimumReleaseAge: 10080      # 公開から 7 日（分）経っていない版は入れない
+trustPolicy: no-downgrade     # 更新でセキュリティ設定が引き下げられるのを防ぐ
 
 # minimumReleaseAge は「新しく追加しようとしている依存」だけでなく、既に固定している
 # 依存も lockfile を書き換える操作（pnpm add 等）のたびに再検証する。そのため、既存の
@@ -36,3 +36,17 @@ minimumReleaseAgeExclude:
 # override で 1 本に集約する。
 overrides:
   brace-expansion: 5.0.8
+
+  # Task 6（OpenAPI 型生成）で @nestjs/swagger@11.4.6 / openapi-typescript@7.13.0 を追加した
+  # ところ、両者が推移的に持ち込む js-yaml に High 脆弱性が 2 件見つかった
+  # （GHSA-52cp-r559-cp3m: js-yaml@4.2.0、GHSA-pm4m-ph32-ghv5: js-yaml@5.2.1）。
+  # js-yaml はこのリポジトリに 3 系統ある（3.15.0 は jest 経由で対象外、4.2.0 は
+  # openapi-typescript → @redocly/openapi-core 経由、5.2.1 は @nestjs/swagger 経由）。
+  # メジャーバージョンが異なり API 互換性が無いため単一バージョンには集約できない。
+  # pnpm の overrides はキーに `@<range>` を付けると、その range を要求している依存元
+  # だけを対象にできる（例: `js-yaml@4` は js-yaml の 4.x を要求する依存元にのみ適用され、
+  # 3.x / 5.x を要求する依存元には影響しない）ため、系統ごとに個別の修正版を当てる。
+  # 修正版の公開日は 4.3.0 が 37.6 日前、5.2.2 が 10.6 日前で、いずれも
+  # minimumReleaseAge（7 日）を満たす。
+  js-yaml@4: 4.3.0
+  js-yaml@5: 5.2.2
