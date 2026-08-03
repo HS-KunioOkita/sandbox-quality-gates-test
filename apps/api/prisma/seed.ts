@@ -2,6 +2,11 @@ import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
+// e2e から参照できるよう ID を固定する。画面はユーザー ID の手入力を求める作りなので、
+// 自動採番の uuid だと Playwright 側が入力すべき値を知る手段が無い。
+const MEMBER_ID = '11111111-1111-4111-8111-111111111111';
+const GUEST_ID = '22222222-2222-4222-8222-222222222222';
+
 async function main(): Promise<void> {
   // 冪等にするため既存データを消してから投入する
   await prisma.order.deleteMany();
@@ -9,6 +14,7 @@ async function main(): Promise<void> {
 
   const member = await prisma.user.create({
     data: {
+      id: MEMBER_ID,
       email: 'member@example.com',
       name: '会員ユーザー',
       isMember: true,
@@ -25,6 +31,7 @@ async function main(): Promise<void> {
 
   const guest = await prisma.user.create({
     data: {
+      id: GUEST_ID,
       email: 'guest@example.com',
       name: '非会員ユーザー',
       isMember: false,

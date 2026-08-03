@@ -681,6 +681,39 @@ overrides:
 
 適用後、`pnpm why js-yaml` で 3.15.0 / 4.3.0 / 5.2.2 の 3 系統に分かれていること、`./scripts/gates/l2-osv.sh` が `No issues found` で `exit=0` に戻ることを確認した。`pnpm turbo test` / `pnpm turbo typecheck` / `pnpm lint` / `./scripts/gates/l3-openapi-drift.sh`（drift なし、`exit=0`）も再実行し、バージョン変更による回帰が無いことを確認済み。
 
+### 1.35 Playwright（E2E）を `GATE_ORDER` に入れなかった判断と、手順書 §4.1 が触れていないテストデータ準備
+
+手順書 §4.1 は E2E（Web）を Playwright、「△ 主要導線のみ」とし、付録は「主要導線のみ PR、フルは nightly」と位置づける。この位置づけに従い、Phase 3 では `scripts/gates/l3-e2e-web.sh` を作るだけに留め、**`GATE_ORDER` にも `GATE_DETECTION` にも入れなかった**。理由は 2 つ。
+
+**(1) 所要時間。** 主要導線 1 本・Chromium 1 ワーカーでも `pnpm --filter web exec playwright test` は API（`ts-node` 起動）と Vite の `webServer` 起動を含めて実測 約 7.5 秒かかる（詳細は §3 Phase 3 の実測記録を参照）。これを 14 検証ケース全部で毎回実行すると、Postgres の起動確認・API/Vite の起動・ブラウザ実行が単純に 14 倍になる。しかも `l3-e2e-web.sh` は DB の起動・migrate・seed を自分では行わない（ゲートスクリプトの責務外とした。詳細は本節末尾）ため、`GATE_ORDER` に入れる場合はハーネス側にその手当ても追加で必要になる。
+
+**(2) error(2) の発生源が増える。** L3 の他ゲート（`l3-test`）は Testcontainers が Docker 依存の唯一の理由だが、E2E は Docker（Postgres）に加えて **API プロセスの起動・Vite の起動・Chromium の起動** という 3 つの追加の失敗点を持つ。手順書の 3 値写像（pass/fail/error）を守るなら、`l3-e2e-web.sh` は「テストが実際に失敗した」と「そもそも webServer が起動できなかった」を切り分ける必要があり（本スクリプトは `l3-test.sh` と同じ `gate_fail_if_matches` パターンでこれを行う）、全 14 ケースに対してこの切り分けの正しさを保証する対象が増える。手順書 §4.1 の「主要導線のみ PR」という記述は、これらのコストに触れていない。
+
+**手順書 §4.1 は E2E がアプリと DB をどう起こすかに一切触れていない。** 実装にあたり、以下をすべて自分で決める必要があった。
+- `webServer`（Playwright 設定）で API と Vite をどう起動するか。今回は `command` に `pnpm --filter api run start:dev` / `pnpm --filter web run dev` を指定し、DB は `pnpm db:up`（docker compose）で事前に起動済みという前提にした。
+- API 側の起動待ち受けをどう判定するか。`AuthGuard` が `x-user-id` ヘッダを必須にするため `GET /orders` は常に 401 を返す。これを Playwright の `webServer.url` にそのまま使えるかは版依存の懸念があったが、**実測では 1.62.0 で 401 のレスポンスでも「起動した」と判定され、brief どおりの設定で問題なく動いた**（`ignoreHTTPSErrors: true` の指定のまま、`port` 方式への変更は不要だった）。
+- テストデータ（seed）をどう用意するか、次項で述べる。
+
+**`App.tsx` がユーザー ID を画面から手入力する作りのため、seed 側の ID を固定する必要があった。** `apps/api/prisma/seed.ts` は `@default(uuid())` に任せて `User.create` の ID を指定していなかったため、投入するたびに ID が変わる。画面はユーザー ID を入力させる作り（自動ログインや URL パラメータでの受け渡しが無い）なので、Playwright 側が「どの ID を入力すればよいか」を知る手段がない。手順書は E2E のテストデータ準備について一切書いていないため、`seed.ts` に `MEMBER_ID` / `GUEST_ID` の固定 UUID を追加し、`e2e/orders.spec.ts` からも同じ値を参照する形にした（冪等性の `deleteMany` は変更していない）。
+
+**Step 5（ローカル実行）の所要時間**: `pnpm db:up` → `db:migrate` → `db:seed` → `pnpm --filter web exec playwright test` の一連で、Playwright 本体の実行（API/Vite の起動含む）は約 7.5 秒、1 件 PASS。DB 起動・migrate・seed を含めても数十秒のオーダーで、単体では軽い。問題は「これを 14 ケース分」という掛け算のほうである。
+
+### 1.36 vitest の既定 include が Playwright の `*.spec.ts` も拾い、`l3-test`（`GATE_ORDER` のブロッキングゲート）を壊す
+
+Playwright の仕様どおり `apps/web/e2e/orders.spec.ts` を追加したところ、`./scripts/gates/l3-test.sh`（`GATE_ORDER` 内、ブロッキング）が **exit 2（error）** で落ちた。原因は vitest の既定 `include`（`**/*.{test,spec}.?(c|m)[jt]s?(x)`）が `apps/web` 配下の `*.spec.ts` を無条件に拾う仕様で、`e2e/orders.spec.ts` も vitest 自身のテストファイルとして実行しようとしたため。Playwright の `test()` は vitest のテストランナーから直接呼べず、`Playwright Test did not expect test() to be called here` というエラーでスイートごと失敗する。
+
+これは §1.34 と同型の「ある層の導入作業が別の層（しかも同じ L3 内の別ゲート）の判定結果を変える」相互作用である。手順書 §4.1 も §4.6 も、Playwright 用のテストファイルを vitest の対象から除外する必要があることには触れていない。`apps/web/vitest.config.ts` に `exclude: [...configDefaults.exclude, 'e2e/**']` を追加して解消し、`l3-test.sh` が再び `exit=0` になることを確認した。
+
+**この発見は「テストを足したら対象コードを壊して赤くなることを確認する」という本プロジェクトの原則だけでは検出できない。** `orders.spec.ts` 単体は意図通り赤くなる（§1.35 のとおり実測済み）。壊れたのは無関係な既存ゲート（`l3-test`）のほうであり、これは新規ゲート・新規テストを追加した際に **既存の全ゲートを一通り再実行して回帰が無いか確認する**（CLAUDE.md が「ハーネス自身も例外ではない」として求めている確認と同種）ことでしか捕まえられない。
+
+### 1.37 ESLint の `projectService: true` は既定名 `tsconfig.json` 経由でのみ設定ファイルを解決する。`tsconfig.node.json` への追加だけでは足りない
+
+`playwright.config.ts` を `apps/web/tsconfig.node.json` の `include` にだけ追加したところ、`tsc -p tsconfig.node.json --noEmit`（`--listFiles` で確認）は正しく `playwright.config.ts` を含めるのに、`pnpm exec eslint .`（`l1-lint`、`GATE_ORDER` 内）は `was not found by the project service. Consider either including it in the tsconfig.json or including it in allowDefaultProject` というエラーで落ちた。
+
+原因を切り分けるため、`tsconfig.node.json` の `include` に無害なダミーファイルを追加する実験を行い、**新規に追加したファイルは（既存の `vite.config.ts` / `vitest.config.ts` と同じ書き方でも）`tsconfig.node.json` だけでは ESLint の project service に解決されない**ことを確認した。既存の `vite.config.ts` / `vitest.config.ts` が通っていたのは、実は `tsconfig.node.json` 経由ではなく、**`apps/web/tsconfig.json`（既定名）の `include` にも同じ 2 ファイルが重複して列挙されていたため**だった。typescript-eslint の project service は tsserver 相当の挙動で、既定名 `tsconfig.json` を起点に解決するらしく、`tsconfig.node.json` は `pnpm --filter web run typecheck` が明示的に `-p` で叩く独立した第二プロジェクトとしてのみ機能し、ESLint 側の自動発見の対象にはならない。
+
+対処として `playwright.config.ts` を `tsconfig.json` の `include` にも追加した（`tsconfig.node.json` 側の追加も型チェックのカバレッジのため残した）。この事実は Phase 1 の申し送り（§3 の表の #3「`projectService: true` が `vite.config.ts` / `vitest.config.ts` を解決できるか確認する」）で存在自体は示唆されていたが、「`tsconfig.node.json` に足すだけでは解決されない」という具体的な落とし穴は今回初めて実測で確認した。
+
 ---
 
 ## 2. 検証ケースの期待値に対する申し送り
