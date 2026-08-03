@@ -93,4 +93,16 @@ describe('Orders (e2e)', () => {
     // 申し送り #12: 現状は Prisma の FK 違反（P2003）が未処理で 500 になる。
     expect(response.status).toBe(400);
   });
+
+  it('x-user-id が無ければ 401 を返す', async () => {
+    const response = await request(app.getHttpServer()).get('/orders');
+
+    expect(response.status).toBe(401);
+  });
+
+  it('x-user-id が無ければ個別取得も 401 を返す', async () => {
+    const response = await request(app.getHttpServer()).get(`/orders/${memberOrderId}`);
+
+    expect(response.status).toBe(401);
+  });
 });
