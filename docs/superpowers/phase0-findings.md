@@ -598,6 +598,45 @@ FAIL e2e test/orders.e2e-spec.ts
 
 **手順書 §4 は e2e で NestJS アプリを立てる手順を書いていない。** `apps/api/test/orders.e2e-spec.ts` では `Test.createTestingModule({ imports: [AppModule] }).compile()` の後、`main.ts` の `bootstrap` と同じ `ValidationPipe`（`whitelist: true, forbidNonWhitelisted: true, transform: true`）を `app.useGlobalPipes` で明示的に張り直している。ここを揃えないと、**e2e は本番と違う入力検証の下で走ることになる**。具体的には、`main.ts` 側だけに `ValidationPipe` があり e2e 側に無い場合、e2e は許可されるべきでない余分なフィールドや型が合わない値を通してしまい、「テストは緑だが本番は守られていない」（このリポジトリが繰り返し観測している型）を新たに作りうる。手順書への修正提案候補: §4 に e2e アプリのブートストラップ手順（`createNestApplication` 後に `main.ts` と同じグローバルパイプ・フィルタを再設定する必要があること）を明記する。
 
+### 1.31 手順書 §4.5 の fast-check は記述どおり動くが、「PR は速い／nightly は遅い」という含意はこの検証対象では成り立たない
+
+`pnpm add -Dw fast-check@4.9.0` を pnpm 11.1.1 でそのまま実行した。**`-w` はそのまま受け付けられ、エラーは出なかった**（`minimumReleaseAge` 由来の `ERR_PNPM_NO_MATURE_MATCHING_VERSION` も発生しなかった。`fast-check@4.9.0` は `minimumReleaseAgeExclude` に入っていないので、対象バージョンの公開日が実行時点で 7 日ルールを満たしていたためと見られる）。
+
+```
+devDependencies:
++ fast-check 4.9.0
+
+Packages: +2
+++
+Done in 923ms using pnpm v11.1.1
+```
+
+ルート `package.json` の `devDependencies` に `"fast-check": "4.9.0"` が追加された。**手順書 §4.5 のコマンドはそのまま動いた**（§3.3 の `pnpm add -Dw` 系コマンドと違い、修正提案は不要）。
+
+**`FC_NUM_RUNS` の実測**（`apps/api/src/discount/discount.spec.ts` の 3 プロパティ、`pnpm --filter api exec jest --selectProjects unit` で計測。Jest 内部計測値とシェルの `time` 実測を併記）:
+
+| `FC_NUM_RUNS` | Jest 内部計測 | シェル実測（`time`、pnpm 起動込み） |
+|---|---|---|
+| 100（既定） | 0.344 秒 | 0.787 秒 |
+| 10000 | 0.350 秒 | 0.749 秒 |
+
+**手順書 §4.5 の「毎 PR は 100（数秒で終わる）」という主張は実測で裏付けられた**（実測は 1 秒未満で、「数秒」はむしろ余裕を見た表現だった）。一方、「nightly は 10000 で深く探索する」という書き方が暗黙に想定していそうな**「10000 は明らかに時間がかかる」という対比は、この検証対象では成立しなかった**。3 つのプロパティはいずれも `Math.floor` と比較演算だけの軽量な純関数（`applyDiscount`）を検証しており、1 回の実行コストがマイクロ秒オーダーのため、100 回から 10000 回（100 倍）に増やしてもトータル実行時間はほぼ変わらない（表の差は測定誤差の範囲）。`FC_NUM_RUNS` 自体が読まれていないわけではないことは、`NUM_RUNS` の値をテスト内で一時的に `console.error` して確認済みで、既定実行では `100`、`FC_NUM_RUNS=10000` 実行では `10000` と出力された。**「nightly は遅い」という直感が成り立つかどうかは、検証対象の関数が実際にどれだけの計算コストを持つかに依存する**のであって、`numRuns` を増やせば自動的に「深く探索するが遅い」になるわけではない。手順書はこの前提（想定している関数の計算コスト）に触れていない。
+
+**反例の出力形式と「テストコードへの固定化」の現実性**
+
+`apps/api/src/discount/discount.ts` の `Math.floor(price * (1 - MEMBER_DISCOUNT_RATE))` を一時的に `Math.ceil(price * (1 + MEMBER_DISCOUNT_RATE))` に変えて（割引後が元より高くなるように壊して）実行したところ、「割引後の価格は元の価格を超えない」が FAIL し、fast-check は次を出力した。
+
+```
+Property failed after 7 tests
+{ seed: 5861964, path: "6:1:0:0:0:0:0:0:1:0:3:2", endOnFailure: true }
+Counterexample: [1000,true]
+Shrunk 11 time(s)
+```
+
+`Counterexample: [1000,true]` は `fc.property(fc.integer(...), fc.boolean(), (price, isMember) => ...)` の引数順そのままの配列で出力されるため、**手順書が言う「反例は必ずテストコードに固定化してください」（`examples: [[1000, true]] }` という書き方）は、この形式であればほぼ機械的にできる**——出力された `[1000,true]` をそのまま `fc.assert(..., { numRuns: NUM_RUNS, examples: [[1000, true]] })` の `examples` 配列に貼り付ければよい。ただし `seed` と `path` はその実行固有の値であり、固定化に必要なのは `Counterexample:` の配列だけである（`seed` を埋め込めば再現性は上がるが、fast-check のバージョンが変わると縮小アルゴリズムの経路が変わり同じ `seed` でも同じ反例に辿り着く保証はないため、固定化するなら `examples` の方が安全というのが実測からの所感）。
+
+修正確認後、`discount.ts` は `git checkout` で元の実装（`Math.floor(price * (1 - MEMBER_DISCOUNT_RATE))`）に復元し、`pnpm --filter api exec jest --selectProjects unit` を再実行して 20 件全て PASS することを確認した。
+
 ---
 
 ## 2. 検証ケースの期待値に対する申し送り
