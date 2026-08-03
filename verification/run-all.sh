@@ -70,14 +70,23 @@ done
   printf '|---|---|---|---|---|\n'
 } >"$WORK/head.md"
 
+# ケース別・全体の経過時間を計測する（申し送り #26）。ログにタイムスタンプが
+# 無く「実行者の申告とログの mtime しか根拠が無い」状態を解消するのが目的なので、
+# 外部コマンド（date 等）を呼ばずに済む bash 組み込みの SECONDS を使う。
+ALL_STARTED=$SECONDS
+
 shopt -s nullglob
 for case_dir in verification/cases/*/; do
   case_id=$(basename "$case_dir")
   printf '=== %s ===\n' "$case_id" >&2
   stderr_log="$WORK/$case_id.stderr.log"
+  case_started=$SECONDS
   ./verification/run-case.sh "$case_id" >"$WORK/$case_id.json" 2>"$stderr_log"
   case_status=$?
   cat "$stderr_log" >&2
+  # 先頭が "-" だと bash の printf ビルトインがオプションと誤認する
+  # （実測: `printf: --: invalid option`）ため `--` で区切る。
+  printf -- '--- %s: %s 秒 ---\n' "$case_id" "$((SECONDS - case_started))" >&2
   if [ "$case_status" -ne 0 ]; then
     # node_modules の復元失敗（run-case.sh 末尾、pnpm install --frozen-lockfile が
     # 失敗したときのメッセージ）だけは他の exit 2 と同列に扱ってはいけない。
@@ -130,4 +139,5 @@ done
 
 cat "$WORK/head.md" "$WORK/rows.md" >"$RESULTS"
 printf '\n生成しました: %s\n' "$RESULTS" >&2
+printf '全体の所要時間: %s 分 %s 秒\n' "$(((SECONDS - ALL_STARTED) / 60))" "$(((SECONDS - ALL_STARTED) % 60))" >&2
 cat "$RESULTS"
