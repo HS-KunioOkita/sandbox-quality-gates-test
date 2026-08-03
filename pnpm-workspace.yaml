@@ -14,6 +14,19 @@ blockExoticSubdeps: true      # 推移的依存を信頼できない配布元か
 minimumReleaseAge: 10080      # 公開から 7 日（分）経っていない版は入れない
 trustPolicy: no-downgrade     # 更新でセキュリティ設定が引き下げられるのを防ぐ
 
+# minimumReleaseAge は「新しく追加しようとしている依存」だけでなく、既に固定している
+# 依存も lockfile を書き換える操作（pnpm add 等）のたびに再検証する。そのため、既存の
+# 固定依存が 1 つでも公開から 7 日未満だと、追加しようとしている依存自身が条件を
+# 満たしていても pnpm add そのものが全面的に失敗する（Phase 3 Task 1 で実測、
+# phase0-findings.md §1.21）。ルート package.json が固定する @types/node@26.1.2 と
+# jsdom@30.0.0（いずれも 2026-07-27 公開）が実測時点でこれに該当したため、
+# この 2 つだけを除外する。他の直接依存はすべて 7 日ルールの対象のままである。
+# pnpm 自身のエラーメッセージ（ERR_PNPM_NO_MATURE_MATCHING_VERSION）も
+# minimumReleaseAgeExclude の利用を案内している。
+minimumReleaseAgeExclude:
+  - '@types/node'
+  - jsdom
+
 # brace-expansion 1.1.16 / 2.1.2 は GHSA-mh99-v99m-4gvg（High）。いずれも推移的依存で
 # 直接指定していない。修正版 5.0.8 は既に lockfile 内に別経路で入っていたので、
 # override で 1 本に集約する。
