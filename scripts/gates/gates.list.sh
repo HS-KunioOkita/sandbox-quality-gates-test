@@ -10,7 +10,7 @@
 # l2-install は必ず先頭に置くこと。依存が入っていなければ他のゲートは動かず、
 # 連鎖失敗を「ゲートが欠陥を検出した」と誤記録することになる（設計書 §8.2）。
 # shellcheck disable=SC2034  # source する側（gates.test.sh / run-case.sh / run-all.sh）が参照する
-GATE_ORDER=(l2-install l1-typecheck l1-lint l2-semgrep l2-osv l2-gitleaks)
+GATE_ORDER=(l2-install l1-typecheck l1-lint l2-semgrep l2-osv l2-gitleaks l3-test)
 
 # 非ブロックゲート。exit code は常に 0 なので、出力内容で判定する（設計書 §8.1）。
 # shellcheck disable=SC2034  # 同上

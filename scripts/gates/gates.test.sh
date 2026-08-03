@@ -52,7 +52,7 @@ done
 # 「このハーネス最大の誤判定リスク」と呼ぶのはデーモン不在の方なので、そこを直接突く。
 # DOCKER_HOST を存在しないソケットに向ければ、バイナリは在るまま到達不能を作れる
 # （Docker Desktop を止める必要はない。Task 2 で実測）。
-for gate in l2-semgrep l2-osv l2-gitleaks; do
+for gate in l2-semgrep l2-osv l2-gitleaks l3-test; do
   out=$( DOCKER_HOST=unix:///nonexistent/docker.sock "./scripts/gates/$gate.sh" 2>&1 )
   code=$?
   check "$gate はデーモンに到達できないとき error" 2 "$code"
