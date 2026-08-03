@@ -374,18 +374,33 @@ Ran 147 rules on 77 files: 0 findings
 
 手順書 §3.3 は `--frozen-lockfile` と `--ignore-scripts` しか扱っておらず、pnpm 側の供給網設定（`blockExoticSubdeps` / `minimumReleaseAge` / `trustPolicy`）に触れていない。一方 **semgrep はこれらの設定を要求してくる**。Phase 2 で観測したのはルール ID 3 件・重大度 MEDIUM（ERROR ではない）で、**どのルールセットが出したかは測っていない**。ゲートは `p/typescript` / `p/nodejs` / `p/react` / `p/owasp-top-ten` / `p/secrets` を同時に渡しているので、レジストリのこの 5 セットのいずれかである。
 
-Phase 2 では semgrep の指摘に従って `minimumReleaseAge: 10080`（7 日）を入れた。その結果、**このリポジトリの「依存は全て最新版に完全固定」という方針と構造的に衝突した**。実測で 2 回踏んでいる。
+Phase 2 では semgrep の指摘に従って `minimumReleaseAge: 10080`（7 日）を入れた。その結果、**このリポジトリの「依存は全て最新版に完全固定」という方針と構造的に衝突した**。実測で 3 回踏んでいる。
 
 | 場面 | 何が起きたか |
 |---|---|
 | `overrides` を lockfile に反映させるフル再解決 | `ERR_PNPM_NO_MATURE_MATCHING_VERSION` で失敗。設定を一時的に無効化して入れ直すブートストラップが必要だった |
 | 検証ケース `L2-04` のために `dayjs@1.11.21` を追加 | `ERR_PNPM_NO_MATURE_MATCHING_VERSION` で失敗。**原因は dayjs ではなく、既に同じ版で固定済みの無関係な `@turbo/linux-arm64` 2.10.7 が公開 5 日目だったこと** |
+| Phase 3 Task 1 で `@testcontainers/postgresql@12.0.4` を追加 | `ERR_PNPM_NO_MATURE_MATCHING_VERSION` で失敗。**原因は `@testcontainers/postgresql` ではなく、ルート `package.json` に固定済みの無関係な `@types/node@26.1.2`（公開 2026-07-27）が公開 6 日目だったこと** |
 
 後者が重要である。**`minimumReleaseAge` は「既存の固定依存が 1 つでも 7 日未満なら、新しい依存を一切追加できない」状態を作る。** 追加しようとしているパッケージ自身が条件を満たしていても関係ない（`dayjs@1.11.21` は公開 2026-05-26 で単体では余裕で満たす）。依存を頻繁に最新へ上げるリポジトリでは日常的に起きる。pnpm 自身のエラーメッセージが `minimumReleaseAgeExclude` を案内している。
 
 なお、`overrides` を追加しただけの `pnpm install --no-frozen-lockfile` は pnpm 11.x で**無言で何もしない**（lockfile が更新されない）。これも実測。
 
 **手順書への提案**：§3.3 に pnpm 側の供給網設定を 1 節設ける。`minimumReleaseAge` については、上記の「無関係な依存が原因で新規追加が全面的に止まる」挙動と `minimumReleaseAgeExclude` の存在を必ず併記する。この副作用を知らずに入れると、依存追加のたびに原因不明の失敗に見える。
+
+**3 回目の実測（Phase 3 Task 1、`minimumReleaseAgeExclude` の恒久導入に至った経緯）**
+
+Phase 3 Task 1（Testcontainers 統合テスト基盤）の `pnpm add -D --filter api @testcontainers/postgresql@12.0.4`（単体では 7 日ルールを満たす。公開 2026-06-29）が、次のエラーで失敗した。
+
+```
+[ERR_PNPM_NO_MATURE_MATCHING_VERSION] Version 26.1.2 (released 6 days ago) of @types/node does not meet the minimumReleaseAge constraint
+```
+
+追加しようとしていたパッケージが原因でないことを切り分けるため、無関係なトリビアルパッケージ `is-odd@3.0.1` を同じ `pnpm add -D --filter api` で試したところ、**同一のエラーが再現した**。つまり、**このリポジトリでは lockfile に新しいエントリを書く操作（`pnpm add` 全般）が、追加対象を問わず一切実行できない状態**になっていた。一方、追加・変更を伴わない `pnpm install` は `Already up to date` で正常終了する。詰まるのは「lockfile を書き換える必要がある操作」だけであり、既存の lockfile を読むだけの操作は影響を受けない。
+
+Phase 2 では検証ケース `L2-04` の 1 回だけ CLI オーバーライド（`--config.minimumReleaseAge=0`）で凌いだ。Phase 3 では L3 のテスト整備で依存追加が複数タスクに分散する見込みで、都度 CLI オーバーライドに頼る運用は持たない。さらに今回は、その CLI オーバーライドの実行自体が Claude Code の auto mode classifier に拒否され（Phase 2 のときは通っていた）、選択肢として使えなかった。そこで、直接依存 35 個すべての公開日を実測で棚卸しし、7 日ルールを満たさなかった 2 つ（`@types/node@26.1.2` / `jsdom@30.0.0`、いずれも 2026-07-27 公開）だけを `pnpm-workspace.yaml` の `minimumReleaseAgeExclude` に登録する恒久対応へ切り替えた。`minimumReleaseAge: 10080` 自体は変更していない。
+
+この「直接依存 35 個の公開日を全件確認する」棚卸し作業自体が、`minimumReleaseAge` の見えない運用コストである。`minimumReleaseAgeExclude` を使わずに済ませようとすると、依存を 1 つ追加するたびに、無関係な既存の固定依存の公開日をすべて手動で確認し直す羽目になる。これは本項が既に手順書への提案として挙げていた「`minimumReleaseAgeExclude` の存在を併記すべき」という主張を、実運用で裏付ける結果になった。
 
 ### 1.22 pnpm 11 では `allowBuilds` の `@prisma/client` が必要（§1.3 の更新）
 
@@ -515,6 +530,37 @@ remote:       —— Amazon AWS Secret Access Key ——
 **この Phase での対処**: GitHub が提示した unblock URL で「テストで使用する値」として許可した。履歴の書き換えは選ばなかった。書き換えると、この検証プロジェクトの成果である測定の履歴そのものが失われるうえ、検出器に引っかからない値に差し替えれば `L2-03` の測定（gitleaks と semgrep の両方が反応した）が成立しなくなるためである。
 
 **Phase 3 以降への影響**: L3〜L5 のケースでも、秘密・資格情報を題材にするものは同じ壁に当たる。ケースを設計する段階でこの制約を織り込むこと。
+
+### 1.29 手順書 §4.2 の Testcontainers コードは、DATABASE_URL の差し替えだけでは動かない（仮説 8 の結論）
+
+手順書 §4.2 のコード（`PostgreSqlContainer` を起動し `process.env.DATABASE_URL` を差し替えるだけの `beforeAll`）をそのまま `apps/api/test/setup-db.ts` に置き、統合テスト（`apps/api/test/orders.int-spec.ts`）を実行したところ、**実測どおり失敗した**。
+
+```
+FAIL integration test/orders.int-spec.ts (7.93 s)
+  ● OrdersService（実 DB） › 自分の注文だけを、会員割引を適用した合計付きで返す
+
+    PrismaClientKnownRequestError:
+    Invalid `prisma.order.deleteMany()` invocation in
+    /Users/kuniookita/works/github/sandbox-quality-gates-test/apps/api/test/orders.int-spec.ts:22:24
+
+    The table `public.Order` does not exist in the current database.
+```
+
+（`public.User` ではなく `public.Order` だったのは `beforeEach` が `order.deleteMany()` → `user.deleteMany()` の順で呼んでいるため。原因は同じで、**コンテナが起動した空の PostgreSQL にテーブルが 1 つも無い**ことである。）
+
+手順書 §4.2 は `DATABASE_URL` をコンテナの接続 URI に差し替えるところまでしか書いておらず、**空の DB にスキーマを適用する手順が無い。** `setup-db.ts` の `beforeAll` に `execFileSync('pnpm', ['exec', 'prisma', 'migrate', 'deploy'], ...)` を追加したところ、同じ 2 件のテストが通った（`Test Suites: 1 passed, 1 total` / `Tests: 2 passed, 2 total`）。**仮説 8（手順書 §4.2 に記述漏れがある）は支持された。**
+
+マイグレーション適用の実装で 2 点、追加で踏んだ／避けた落とし穴を記録する。
+
+- **`env` に `DATABASE_URL` を明示的に渡さないと、`.env` のローカル開発用 DB に適用されうる。** `prisma migrate deploy` はリポジトリルートの `.env`（`postgresql://postgres:postgres@localhost:5432/quality_gates?schema=public`、`pnpm db:up` の Docker Compose DB）を読むが、Prisma CLI は**既に `process.env` にある値を上書きしない**。`beforeAll` 内で `process.env.DATABASE_URL = url` を代入していても、`execFileSync` の呼び出し自体に `env: { ...process.env, DATABASE_URL: url }` を明示しないと、子プロセス側の環境変数解決の経路次第でローカル DB を巻き込む事故になりうる。今回は明示することでこれを避けた（実際にローカル DB を壊す事故は起きていない。設計段階で回避した）。
+- `migrate dev` ではなく `migrate deploy` を使う必要がある。`dev` は対話的でシャドー DB の作成を伴い、CI やテストのような非対話環境には向かない。
+
+手順書 §4.1 / §4.2 には、もう 2 つ、`setup-db.ts` を Jest に配線する部分の記述が無い（事前確認 B・C として Phase 3 着手前から把握していた懸念で、今回の実装で実際に確認した）。
+
+- **事前確認 B（命名規則）**: 手順書 §4.1 が指定する `*.int-spec.ts` という命名は、Jest の既定の `testMatch`（`**/*.spec.ts` 等）に載らない。`jest.config.ts` で `testMatch: ['<rootDir>/test/**/*.int-spec.ts']` を明示しない限り、統合テストは**エラーにもならず黙って実行されない**（「テストを置いたのに Jest が拾わず緑のまま」という、このリポジトリが繰り返し踏んでいる型そのもの）。
+- **事前確認 C（`setupFilesAfterEnv` の適用範囲）**: `setup-db.ts` を素朴に全テストの `setupFilesAfterEnv` に置くと、DB を使わない単体テスト（`src/**/*.spec.ts`）でも実行のたびに Testcontainers が Docker コンテナを起動しにいく。Docker が無い環境では単体テストまで巻き添えで落ち、実行時間も数秒から数十秒に膨れる。`jest.config.ts` を `unit` / `integration` / `e2e` の `projects` に分け、`setupFilesAfterEnv` を `integration` / `e2e` だけに持たせることで、`pnpm --filter api exec jest --selectProjects unit` は Docker を起動せず数百ミリ秒で完了することを実測で確認した（`Tests: 13 passed, 13 total`、`Time: 0.28s` 台）。
+
+手順書への修正提案は 3 点。(1) §4.2 に `prisma migrate deploy` の適用を明記する。(2) その際 `env` へ `DATABASE_URL` を明示的に渡す必要があること（`.env` のローカル DB を巻き込む事故を避けるため）を併記する。(3) §4.1 に、`testMatch` と `setupFilesAfterEnv` を種別ごとの `projects` に分ける具体的な `jest.config.ts` の配線例を示す。
 
 ---
 

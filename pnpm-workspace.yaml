@@ -4,15 +4,18 @@ packages:
 allowBuilds:
   '@prisma/client': true
   '@prisma/engines': true
+  cpu-features: false # ssh2 の native crypto 高速化用。Docker はローカルソケット経由のみで使い、ssh2 の SSH 接続機能は使わないため不要
   prisma: true
+  protobufjs: false # postinstall は devDependencies の versionScheme 警告を出すだけで、ビルドは発生しない
+  ssh2: false # @testcontainers/postgresql の推移的依存（Docker の ssh:// ホスト対応）。ローカル Docker Desktop のみが対象で SSH 経由の接続はしない
   unrs-resolver: true
 
 # 供給網対策。semgrep の p/nodejs が要求する 3 つ（実測で findings として挙がった）。
 # 手順書 §3.3 は「架空パッケージ・供給網対策」を掲げながら pnpm 側のこれらの設定に
 # 触れていない。§1 の修正提案として記録する。
-blockExoticSubdeps: true      # 推移的依存を信頼できない配布元から入れさせない
-minimumReleaseAge: 10080      # 公開から 7 日（分）経っていない版は入れない
-trustPolicy: no-downgrade     # 更新でセキュリティ設定が引き下げられるのを防ぐ
+blockExoticSubdeps: true # 推移的依存を信頼できない配布元から入れさせない
+minimumReleaseAge: 10080 # 公開から 7 日（分）経っていない版は入れない
+trustPolicy: no-downgrade # 更新でセキュリティ設定が引き下げられるのを防ぐ
 
 # minimumReleaseAge は「新しく追加しようとしている依存」だけでなく、既に固定している
 # 依存も lockfile を書き換える操作（pnpm add 等）のたびに再検証する。そのため、既存の
