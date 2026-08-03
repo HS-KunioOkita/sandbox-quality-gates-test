@@ -501,6 +501,8 @@ Phase 2 で新たに確認したのは、**その対処が `--ignore-scripts` �
 
 **ハーネス側の対処**は Phase 3 以降の課題として §3 に申し送る。
 
+**追記（Phase 3）**：上記の (a)（非ブロックゲート用の照合列を足す）を選択し解消した。`judge()` に `detectedBy` / `detectingLayers` を追加し、`claimed_gate` が非ブロックゲートを指す場合は `blockedBy` ではなく `detectedBy` で照合する規約にした。「止めた」と「検出した」は別概念なので `blockedBy` には混ぜず、`RESULTS.md` の表示でも「（検出のみ）」と注記して区別している。**`claimed_layer` は一切書き換えていない。** 手順書の主張（L2 が新規依存を検出する）はそのままで、ハーネス側が「検出」を測れるようになっただけである。詳細は `.superpowers/sdd/2026-08-03-phase3-l3-tests/task-8-report.md` を参照。
+
 ### 1.27 手順書 §10 の層の割り当てが排他的かどうかは、今回は反証が得られなかった（否定的結果）
 
 Phase 2 で L2 ゲートが 4 本増えたため、**L1 系のケースに L2 が反応する**（＝手順書 §10 の層の割り当てが排他的でない）ことを期待して観測した。
@@ -713,6 +715,42 @@ Playwright の仕様どおり `apps/web/e2e/orders.spec.ts` を追加したと�
 原因を切り分けるため、`tsconfig.node.json` の `include` に無害なダミーファイルを追加する実験を行い、**新規に追加したファイルは（既存の `vite.config.ts` / `vitest.config.ts` と同じ書き方でも）`tsconfig.node.json` だけでは ESLint の project service に解決されない**ことを確認した。既存の `vite.config.ts` / `vitest.config.ts` が通っていたのは、実は `tsconfig.node.json` 経由ではなく、**`apps/web/tsconfig.json`（既定名）の `include` にも同じ 2 ファイルが重複して列挙されていたため**だった。typescript-eslint の project service は tsserver 相当の挙動で、既定名 `tsconfig.json` を起点に解決するらしく、`tsconfig.node.json` は `pnpm --filter web run typecheck` が明示的に `-p` で叩く独立した第二プロジェクトとしてのみ機能し、ESLint 側の自動発見の対象にはならない。
 
 対処として `playwright.config.ts` を `tsconfig.json` の `include` にも追加した（`tsconfig.node.json` 側の追加も型チェックのカバレッジのため残した）。この事実は Phase 1 の申し送り（§3 の表の #3「`projectService: true` が `vite.config.ts` / `vitest.config.ts` を解決できるか確認する」）で存在自体は示唆されていたが、「`tsconfig.node.json` に足すだけでは解決されない」という具体的な落とし穴は今回初めて実測で確認した。
+
+### 1.38 ゲート別の経過秒数が初めて数値で見えるようになった。`l2-semgrep` が突出している
+
+申し送り #26 は「約 40 分」という所要時間がログの mtime と実行者の申告だけを根拠にした推定値であり、厳密な計測ではないと書いていた。Phase 3 で `run-case.sh` の `run_gate` / `run_detection_gate` に `SECONDS`（bash 組み込み）による計測を足し、コントローラが `./verification/run-case.sh L1-02-explicit-any` を実行して得たゲート別の実測値は次のとおり。
+
+```
+l2-install           exit=0  2s
+l1-typecheck         exit=0  3s
+l1-lint              exit=1  5s
+l2-semgrep           exit=0 15s
+l2-osv               exit=1  3s
+l2-gitleaks          exit=0  1s
+l3-test              exit=0  2s
+l3-openapi-drift     exit=0  4s
+l2-new-deps          exit=0  0s
+```
+
+**`l2-semgrep` が 15 秒で突出している。** 他の 8 ゲートの合計（約 20 秒）に匹敵する規模で、1 ケースの所要時間のほぼ半分を占める。申し送り #26 が挙げた高速化候補のうち、**「semgrep のレジストリ取得のキャッシュ」が最も効く見込み**である。
+
+ただし**この 1 ケースの計測は Docker イメージが既に pull 済み・semgrep のルールレジストリのキャッシュが温まった状態のもの**であり、`run-all.sh` が回す 14 ケース全体の所要時間はまだ実測していない。ケースごとにゲート構成や検出有無が異なるため、この 1 件の数値をもって全体像を断定しないこと。
+
+なお TSV（`ACTUAL`）には列を追加していない。`judge.mjs` の `parseActual` は 4 列目以降を `summary` として結合する実装なので、経過秒数用の列を挿入すると判定が静かに壊れる。経過秒数は stderr への `printf` として出す方式を選んだ。
+
+### 1.39 依存を完全固定していても、時間の経過だけでゲートが赤くなる。OSV-Scanner と `minimumReleaseAge` が正面から衝突する構造的なデッドロック
+
+Phase 2 で `brace-expansion` の High 脆弱性（GHSA-mh99-v99m-4gvg）に対処するため、`overrides: brace-expansion: 5.0.8` を入れて固定した（§1.15 相当の供給網対策の一部）。
+
+**Phase 3 の作業中（2026-08-04）に、その 5.0.8 に対して新たな High 脆弱性 GHSA-rgw5-rvv9-x895（CVSS 7.5）が公開された。** バージョンを一切変更していないのに、日付が変わり OSV のデータベースが更新されただけで `l2-osv` が fail するようになった。**依存を完全固定していても、時間の経過だけでゲートが赤くなる**ことが実測で確認された。
+
+ここでデッドロックが生じた。修正版 `5.0.9` は公開 4.6 日前で、`pnpm-workspace.yaml` の `minimumReleaseAge: 10080`（7 日）を満たさず、そのままではインストールできない。**つまり OSV-Scanner が「上げろ」と言い、`minimumReleaseAge` が「上げさせない」状態になる。** 手順書 §3.3 はこの 2 つ（OSV-Scanner による脆弱性スキャンと pnpm の `minimumReleaseAge`）を並べて推奨しているが、**両者が正面から衝突しうることには触れていない。**
+
+この衝突は偶然ではなく構造的である。**脆弱性の公開から修正版のリリースまでの期間が `minimumReleaseAge` の設定値より短い場合、この衝突は必ず起きる。** 修正版は脆弱性の公開直後（多くの場合、公開とほぼ同時か数時間〜数日後）に出ることが多いので、**7 日という設定はこの衝突を高確率で引き起こす。** 今回の 4.6 日という数字はその典型例である。
+
+今回は `minimumReleaseAgeExclude` に `brace-expansion` を追加して回避した（`@types/node` / `jsdom` に続く 3 例目、`pnpm-workspace.yaml` 参照）。しかし**除外リストが脆弱性のたびに増えていくなら、`minimumReleaseAge` は実質的に機能しなくなる。** 除外運用を無制限に続ければ「7 日待つ」という保護そのものが空文化する。
+
+**手順書への提案**：§3.3 に `minimumReleaseAge` を書くなら、脆弱性対応時の例外運用を必ず併記すること。具体的には (1) `minimumReleaseAgeExclude` の運用ルール（誰が・どういう基準で追加してよいか、追加した除外をいつ見直すか）、または (2) 脆弱性対応に起因する更新は `minimumReleaseAge` の対象外とする設定・運用のいずれかを明示する必要がある。「7 日待て」とだけ書いて例外運用に触れないのは、OSV-Scanner による脆弱性スキャンと正面から矛盾する。
 
 ---
 
