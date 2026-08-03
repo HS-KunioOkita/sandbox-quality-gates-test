@@ -402,6 +402,18 @@ Phase 2 では検証ケース `L2-04` の 1 回だけ CLI オーバーライド�
 
 この「直接依存 35 個の公開日を全件確認する」棚卸し作業自体が、`minimumReleaseAge` の見えない運用コストである。`minimumReleaseAgeExclude` を使わずに済ませようとすると、依存を 1 つ追加するたびに、無関係な既存の固定依存の公開日をすべて手動で確認し直す羽目になる。これは本項が既に手順書への提案として挙げていた「`minimumReleaseAgeExclude` の存在を併記すべき」という主張を、実運用で裏付ける結果になった。
 
+**もう 1 つの運用コスト（`allowBuilds` による postinstall の個別許可）**
+
+`minimumReleaseAge` とは別に、pnpm 11 は新しい依存を 1 つ足すたびに、その依存が持つ推移的依存の postinstall スクリプトについても `allowBuilds` での明示的な許可判断を迫ってくる。既定では未許可の build script は `ERR_PNPM_IGNORED_BUILDS` として黙って無視されるだけだが、`pnpm-workspace.yaml` にプレースホルダー行（`<package>: set this to true or false`）が追加され、`true` / `false` を書き込むまで解消しない。
+
+Phase 3 Task 1 では `@testcontainers/postgresql` 1 つを追加しただけで、推移的依存 3 つ（`ssh2` / `cpu-features` / `protobufjs`）について、この判断が必要になった。それぞれ次の理由で `false`（build script を実行しない）とした。
+
+- `ssh2`: `@testcontainers/postgresql` → `testcontainers` → `dockerode` → `docker-modem` の経路で入る、Docker の `ssh://` ホスト対応用の依存。このリポジトリはローカル Docker Desktop の unix ソケット経由でしか Docker を使わないため、SSH 経由の接続機能自体が不要
+- `cpu-features`: `ssh2` の native crypto 高速化用の依存。`ssh2` を使わない以上、これも不要
+- `protobufjs`: postinstall は `devDependencies` の `versionScheme` に関する警告表示のみで、native ビルドは発生しない。`false` にしても機能上の影響はない
+
+手順書 §3.3 は `--ignore-scripts` にしか触れておらず、`allowBuilds` による個別許可の運用（新しい依存を足すたびに、その推移的依存の postinstall を 1 つずつ判断する必要があること）には触れていない。`minimumReleaseAge` の棚卸しコストと合わせて、**pnpm 側の供給網設定は「入れて終わり」ではなく、依存を追加するたびに繰り返し発生する運用コストを伴う**。上記の手順書への提案（§3.3 に pnpm 側の供給網設定の節を設ける）には、`minimumReleaseAgeExclude` の存在だけでなく、この `allowBuilds` の個別判断コストも併記すべきである。
+
 ### 1.22 pnpm 11 では `allowBuilds` の `@prisma/client` が必要（§1.3 の更新）
 
 申し送り #7 は「`pnpm-workspace.yaml` の `'@prisma/client': true` は `generate` の turbo 配線後は不要」としていた。**この想定は誤りだった。**
