@@ -27,15 +27,28 @@ trustPolicy: no-downgrade     # 更新でセキュリティ設定が引き下げ
 # この 2 つだけを除外する。他の直接依存はすべて 7 日ルールの対象のままである。
 # pnpm 自身のエラーメッセージ（ERR_PNPM_NO_MATURE_MATCHING_VERSION）も
 # minimumReleaseAgeExclude の利用を案内している。
+#
+# brace-expansion もこの例外に加わった。Phase 2 で override 固定した 5.0.8 に対し、
+# Phase 3 の作業中（2026-08-04）に新たな High 脆弱性 GHSA-rgw5-rvv9-x895（CVSS 7.5）が
+# 公開された。依存を完全固定していても、時間の経過だけでゲートが赤くなる実例である。
+# 修正版 5.0.9 は公開 4.6 日前で、minimumReleaseAge（7 日）を満たさずそのままでは
+# インストールできない。OSV-Scanner が「上げろ」と言い、minimumReleaseAge が
+# 「上げさせない」という板挟みになるため、@types/node / jsdom と同じ形で個別に除外する
+# （詳細は phase0-findings.md §1.39）。
 minimumReleaseAgeExclude:
   - '@types/node'
   - jsdom
+  - brace-expansion
 
 # brace-expansion 1.1.16 / 2.1.2 は GHSA-mh99-v99m-4gvg（High）。いずれも推移的依存で
 # 直接指定していない。修正版 5.0.8 は既に lockfile 内に別経路で入っていたので、
-# override で 1 本に集約する。
+# override で 1 本に集約した。
+#
+# その 5.0.8 に対し、Phase 3 の作業中（2026-08-04）に新たな High 脆弱性
+# GHSA-rgw5-rvv9-x895（CVSS 7.5、修正版 5.0.9）が公開されたため、5.0.9 へ更新する。
+# 5.0.9 は上の minimumReleaseAgeExclude に加えたことでインストール可能になった。
 overrides:
-  brace-expansion: 5.0.8
+  brace-expansion: 5.0.9
 
   # Task 6（OpenAPI 型生成）で @nestjs/swagger@11.4.6 / openapi-typescript@7.13.0 を追加した
   # ところ、両者が推移的に持ち込む js-yaml に High 脆弱性が 2 件見つかった
