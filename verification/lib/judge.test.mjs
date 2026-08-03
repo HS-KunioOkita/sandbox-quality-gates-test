@@ -306,3 +306,48 @@ test('claimed_gate の書式が不正なら throw', () => {
   // 書式不正を報告するメッセージ本文に絞る。
   assert.throws(() => parseExpect(p), /claimed_gate が不正です/);
 });
+
+// 以下 2 件は申し送り #25 の規約: claimed_gate が非ブロックゲートを指す場合、
+// 「止めたか」ではなく「検出したか」で claimVerdict / claimGateVerdict を判定する。
+test('claimed_gate が非ブロックゲートのとき、検出していれば match になる', () => {
+  const expected = {
+    id: 'L2-04-new-dependency',
+    pitfall: '実在する新規依存を追加する',
+    claimedLayer: 'L2',
+    claimedGate: 'l2-new-deps',
+    expect: { 'l2-install': 'pass' },
+    expectDetection: { 'l2-new-deps': true },
+  };
+  const actual = {
+    'l2-install': { code: 0, detected: '-', summary: '' },
+    'l2-new-deps': { code: 0, detected: 'true', summary: '' },
+  };
+
+  const result = judge(expected, actual);
+
+  assert.equal(result.claimGateVerdict, 'match');
+  assert.equal(result.claimVerdict, 'match');
+  assert.deepEqual(result.detectedBy, ['l2-new-deps']);
+  // 「止めた」わけではないので blockedBy には入らない
+  assert.deepEqual(result.blockedBy, []);
+});
+
+test('claimed_gate が非ブロックゲートで、検出しなければ mismatch になる', () => {
+  const expected = {
+    id: 'L2-04-new-dependency',
+    pitfall: '実在する新規依存を追加する',
+    claimedLayer: 'L2',
+    claimedGate: 'l2-new-deps',
+    expect: { 'l2-install': 'pass' },
+    expectDetection: { 'l2-new-deps': false },
+  };
+  const actual = {
+    'l2-install': { code: 0, detected: '-', summary: '' },
+    'l2-new-deps': { code: 0, detected: 'false', summary: '' },
+  };
+
+  const result = judge(expected, actual);
+
+  assert.equal(result.claimGateVerdict, 'mismatch');
+  assert.equal(result.claimVerdict, 'not-caught');
+});

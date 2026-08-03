@@ -65,7 +65,11 @@ done
   # 同上（Markdown のコードスパン表記。展開させない意図）
   # shellcheck disable=SC2016
   printf '  ケースは `claimed_gate` で照合するので「層は一致したが名指しされたツールは無反応」を\n'
-  printf '  区別できる。ただし同じゲート内でどのルールが落としたかは区別しない。\n\n'
+  printf '  区別できる。ただし同じゲート内でどのルールが落としたかは区別しない。\n'
+  # 同上（Markdown のコードスパン表記。展開させない意図）
+  # shellcheck disable=SC2016
+  printf -- '- **「止めた」と「検出した」を区別している。** 非ブロックゲート（`l2-new-deps`）は\n'
+  printf '  exit code で欠陥を主張しないので、検出した場合は「（検出のみ）」と注記する。\n\n'
   printf '| ケース | 落とし穴 | 手順書の主張 | 実際に止めた層 | 判定 |\n'
   printf '|---|---|---|---|---|\n'
 } >"$WORK/head.md"
@@ -117,7 +121,13 @@ for case_dir in verification/cases/*/; do
     else if (r.claimVerdict === "mismatch") mark = "❌ 別の層が止めた";
     else if (r.claimGateVerdict === "mismatch") mark = "❌ 層は一致・主張したツールは無反応";
     else mark = "✅ 一致";
-    const blocked = r.blockedBy.length > 0 ? r.blockedBy.join(", ") : "（なし）";
+    // 「止めた」ゲート（blockedBy）と「検出のみ」のゲート（detectedBy、非ブロック
+    // ゲート。申し送り #25）を 1 列にまとめる。両方ある・片方だけある・どちらも
+    // 無いの 3 通りで空文字列と空配列の判定が絡み合うと壊れやすいので、配列のまま
+    // 連結してから空判定する（brief の三項演算子の組み立てだと読みにくいための変更。
+    // 詳細は task-8-report.md）。
+    const caughtParts = [...r.blockedBy, ...r.detectedBy.map((g) => `${g}（検出のみ）`)];
+    const caught = caughtParts.length > 0 ? caughtParts.join(", ") : "（なし）";
     // 手順書がツール名まで名指ししているケースは、その名前も併記する
     const claim = r.expected.claimedGate
       ? `${r.expected.claimedLayer} (${r.expected.claimedGate})`
@@ -133,7 +143,7 @@ for case_dir in verification/cases/*/; do
     const note = notes.length > 0 ? " ※設定ずれ: " + notes.join(" / ") : "";
     // pitfall や注記に | が入ると Markdown の表が壊れるのでエスケープする
     const esc = (s) => String(s).replace(/\|/g, "\\|");
-    process.stdout.write(`| ${esc(r.expected.id)} | ${esc(r.expected.pitfall)} | ${esc(claim)} | ${esc(blocked)} | ${esc(mark + note)} |\n`);
+    process.stdout.write(`| ${esc(r.expected.id)} | ${esc(r.expected.pitfall)} | ${esc(claim)} | ${esc(caught)} | ${esc(mark + note)} |\n`);
   ' "$WORK/$case_id.json" >>"$WORK/rows.md"
 done
 
