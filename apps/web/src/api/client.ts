@@ -1,14 +1,13 @@
-import type { OrderStatus } from '@repo/shared';
+import type { paths } from './schema';
 
-/** 注文一覧の表示に使う 1 件分のデータ */
-export interface OrderView {
-  id: string;
-  productName: string;
-  unitPrice: number;
-  quantity: number;
-  status: OrderStatus;
-  discountedTotal: number;
-}
+/**
+ * 注文一覧の表示に使う 1 件分のデータ
+ *
+ * 生成された OpenAPI の型から導出する。手で書いた interface に戻すと、
+ * API 側の DTO が変わっても Web 側が気づかない状態に戻る（申し送り #10）。
+ */
+export type OrderView =
+  paths['/orders']['get']['responses'][200]['content']['application/json'][number];
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000';
 

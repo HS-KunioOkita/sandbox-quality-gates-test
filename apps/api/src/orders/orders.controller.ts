@@ -1,7 +1,8 @@
 import { Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { ApiOkResponse } from '@nestjs/swagger';
 import { AuthGuard, type AuthenticatedRequest } from '../auth/auth.guard';
 import { CreateOrderDto } from './dto/create-order.dto';
-import type { OrderResponseDto } from './dto/order-response.dto';
+import { OrderResponseDto } from './dto/order-response.dto';
 import { OrdersService } from './orders.service';
 
 @Controller('orders')
@@ -11,12 +12,14 @@ export class OrdersController {
 
   /** 認証済みユーザー自身の注文一覧 */
   @Get()
+  @ApiOkResponse({ type: [OrderResponseDto] })
   findAll(@Req() request: AuthenticatedRequest): Promise<OrderResponseDto[]> {
     return this.ordersService.findByUser(request.userId);
   }
 
   /** 認証済みユーザー自身の注文を作成 */
   @Post()
+  @ApiOkResponse({ type: OrderResponseDto })
   create(
     @Req() request: AuthenticatedRequest,
     @Body() dto: CreateOrderDto,
@@ -26,6 +29,7 @@ export class OrdersController {
 
   /** 認証済みユーザー自身の注文を 1 件取得 */
   @Get(':id')
+  @ApiOkResponse({ type: OrderResponseDto })
   findOne(
     @Req() request: AuthenticatedRequest,
     @Param('id') id: string,

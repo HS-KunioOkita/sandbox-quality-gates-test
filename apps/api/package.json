@@ -7,6 +7,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "jest",
     "generate": "prisma generate",
+    "generate:openapi": "ts-node -P tsconfig.build.json src/openapi.ts",
     "start:dev": "ts-node -P tsconfig.build.json src/main.ts",
     "db:migrate": "prisma migrate dev",
     "db:seed": "ts-node -P tsconfig.build.json prisma/seed.ts"
@@ -23,6 +24,7 @@
     "rxjs": "7.8.2"
   },
   "devDependencies": {
+    "@nestjs/swagger": "11.4.6",
     "@nestjs/testing": "11.1.28",
     "@repo/eslint-config": "workspace:*",
     "@repo/tsconfig": "workspace:*",
