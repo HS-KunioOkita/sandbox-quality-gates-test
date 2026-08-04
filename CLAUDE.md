@@ -17,11 +17,11 @@
 `verification/cases/<CASE-ID>/` に、意図的な欠陥のパッチ（`case.patch`）と期待値（`expect.yml`）を置く。ハーネスが一時ブランチにパッチを当ててゲートを回し、**手順書が「この層が捕まえる」と主張した層が本当に捕まえたか**を判定する。
 
 ```bash
-./verification/run-case.sh <CASE-ID>   # 1 ケース（約 3 分。下の 40 分からの割り算）
-./verification/run-all.sh              # 全ケース + 対照実行、RESULTS.md 生成（Phase 2 時点で概ね 40 分）
+./verification/run-case.sh <CASE-ID>   # 1 ケース（実測 21〜39 秒。§1.38 のケース別内訳）
+./verification/run-all.sh              # 全ケース + 対照実行、RESULTS.md 生成（14 ケース分で実測 6 分台。§1.38）
 ```
 
-`run-all.sh` は Bash ツールのタイムアウト上限（10 分）を超える。**バックグラウンド実行すること。**
+`run-all.sh` は Bash ツールのタイムアウト上限（10 分）に**まだ収まっている**が、**バックグラウンド実行すること。** 上の 6 分台は Docker イメージが pull 済み・semgrep のルールキャッシュが温まった状態での 14 ケース分であり、対照実行（8 ゲート 1 周）を含まない。Phase 5 でケースが 19 本に増えること、キャッシュが冷えた環境では伸びうることを踏まえると、10 分を超える余地は十分にある（§1.38）。
 
 ### 絶対に守ること
 
@@ -42,13 +42,14 @@
 
 - **`corepack` は入っていない。`corepack enable` を実行しないこと。** pnpm 11.1.1 はグローバルインストール済み（volta 配下）。
 - **`gcloud` は入っていない。** 検証はローカル実行のみ。`cloudbuild.*.yaml` は成果物として作るが**実行しない**。
-- **Docker Desktop の起動が必須。** L2 のゲート 3 本はすべて Docker 経由で動く。起動していないとゲートは exit 2（error）を返して止まる（fail ではない）。イメージのタグは `scripts/gates/_lib.sh` に固定してある。
+- **Docker Desktop の起動が必須。** ゲート 4 本が Docker 経由で動く（L2 の 3 本 + Phase 3 で `gate_require_docker` を呼ぶようになった `l3-test`）。起動していないとゲートは exit 2（error）を返して止まる（fail ではない）。L2 の 3 本のイメージのタグは `scripts/gates/_lib.sh` に固定してある。
 
   | ゲート | イメージ |
   |---|---|
   | `l2-semgrep` | `semgrep/semgrep:1.171.0` |
   | `l2-osv` | `ghcr.io/google/osv-scanner:v2.4.0` |
   | `l2-gitleaks` | `zricethezav/gitleaks:v8.30.1` |
+  | `l3-test`（Testcontainers 経由） | `postgres:16-alpine` |
 
 - PostgreSQL は Docker Compose（`pnpm db:up` / `pnpm db:down`。`postgres:16-alpine`）。
 - `shellcheck` 0.11.0（brew）。`scripts/gates/*.sh` と `verification/*.sh` を検査する。
@@ -64,7 +65,7 @@
 
 ## この検証で繰り返し出た教訓
 
-**「ゲートが緑」と「ゲートが守っている」は別物である。** Phase 1 で 4 回踏み、Phase 2 でさらに 6 回観測した（踏んだ 4 件 + 踏む前に気づいた 2 件。`phase0-findings.md` §1.13）。ゲートや設定を足したら、**意図的に違反を 1 つ入れて赤くなることを確認する**。緑を確認するだけでは、そのゲートが何も見ていない状態と区別できない。
+**「ゲートが緑」と「ゲートが守っている」は別物である。** Phase 1 で 4 回踏み、Phase 2 でさらに 6 回（踏んだ 4 件 + 踏む前に気づいた 2 件）、Phase 3 で 3 回 + 最終レビューで 1 回観測した（`phase0-findings.md` §1.13）。ゲートや設定を足したら、**意図的に違反を 1 つ入れて赤くなることを確認する**。緑を確認するだけでは、そのゲートが何も見ていない状態と区別できない。**赤確認は「実際に起こりうる壊し方」で行うこと。** Phase 3 の `l3-test` は Jest（api）を壊す形でしか赤確認しておらず、Vitest（web）だけが落ちる欠陥が error(2) に化けるのを最終レビューまで見逃した（§1.44）。
 
 **テストも同じである。** Phase 2 のレビュー層はこの型の指摘を 7 件出した。テストを足したら、**対象の実装を壊すとそのテストが赤くなること**を確認する。通ることだけを見ても、そのテストが何も固定していない状態と区別できない。
 
@@ -78,7 +79,7 @@ Phase 0（モノレポ基盤とサンプルアプリ）、Phase 1（L1 ゲート
 
 ブロックするゲートは 8 本（`scripts/gates/gates.list.sh` の `GATE_ORDER`）+ 非ブロック 1 本。Playwright（`l3-e2e-web.sh`）は**意図的に `GATE_ORDER` の外**に置いてある（`phase0-findings.md` §1.35）。
 
-全 14 ケースの結果は `verification/RESULTS.md`（**✅ 10 行 / ❌ 4 行**）。L1 系は Phase 1 から退行なし（5 件 ✅ / L1-06 のみ ❌）。`run-all.sh` の所要は **6 分 1 秒**（Phase 2 時点の「概ね 40 分」という推定は厳密な計測ではなかった。§1.38）。
+全 14 ケースの結果は `verification/RESULTS.md`（**✅ 10 行 / ❌ 4 行**）。L1 系は Phase 1 から退行なし（5 件 ✅ / L1-06 のみ ❌）。`run-all.sh` の所要は **6 分 1 秒**（14 ケース分。対照実行を含まない。Phase 2 時点の「概ね 40 分」という推定は厳密な計測ではなかった。§1.38）。
 
 **`RESULTS.md` の ❌ を読むときの注意**:
 
