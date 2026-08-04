@@ -10,7 +10,7 @@
  * require に切り替わり解消する。ブリーフのコードそのものは変えず、
  * ローダー指定の docblock だけを追加した（task-1-report.md 参照）。
  *
- * なお `../stryker.config.json` に `"plugins": ["@stryker-mutator/jest-runner"]`
+ * なお 同じディレクトリの `stryker.config.json` に `"plugins": ["@stryker-mutator/jest-runner"]`
  * を明示しているのも同種の逸脱だが、stryker.config.json は strict JSON で
  * コメントを書けないため理由をここに書く。既定の `plugins: ["@stryker-mutator/*"]`
  * は @stryker-mutator/core 自身のインストール先から相対的にディレクトリを

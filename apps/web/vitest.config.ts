@@ -1,7 +1,7 @@
 import react from '@vitejs/plugin-react';
 import { configDefaults, defineConfig } from 'vitest/config';
 
-// ../stryker.config.json の vitest.configFile がこのファイルを名指ししているため、
+// 同じディレクトリの stryker.config.json の vitest.configFile がこのファイルを名指ししているため、
 // Stryker の逸脱理由もここに書く。stryker.config.json は strict JSON（JSON.parse で
 // 読まれる）でコメントを書けないため（実測。コメントを入れると
 // "File contains invalid JSON" で落ちる）、隣接するこのファイルに書く。
