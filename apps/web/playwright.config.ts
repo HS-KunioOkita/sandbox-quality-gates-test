@@ -11,9 +11,13 @@ export default defineConfig({
     {
       command: 'pnpm --filter api run start:dev',
       url: 'http://localhost:3000/orders',
-      // AuthGuard が x-user-id を要求するので 401 が返る。到達確認としては
-      // これで十分なので、2xx 以外も「起動した」とみなす。
-      ignoreHTTPSErrors: true,
+      // AuthGuard が x-user-id を要求するので GET /orders は 401 を返す。それでも
+      // 起動待ちが成立するのは、Playwright の webServer の readiness 判定が
+      // `statusCode >= 200 && statusCode < 404` を「起動した」とみなす仕様だから
+      // である（playwright-core 1.62.0 の isURLAvailable。401 で通ることは §1.35 で
+      // 実測済み）。到達確認としてはこれで十分なので URL はこのままにする。
+      // ignoreHTTPSErrors はこの判定には効かない（rejectUnauthorized を落とすだけで、
+      // http:// の URL には無意味）ため置かない。
       reuseExistingServer: true,
       timeout: 60_000,
     },
