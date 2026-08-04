@@ -4,6 +4,7 @@ coverage/
 .turbo/
 .env
 reports/
+.stryker-tmp/
 openapi.json
 .superpowers/
 .playwright-mcp/
