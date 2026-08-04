@@ -12,6 +12,6 @@
     "!src/**/*.module.ts"
   ],
   "incremental": false,
-  "thresholds": { "high": 80, "low": 60, "break": null },
+  "thresholds": { "high": 80, "low": 60, "break": 50 },
   "reporters": ["clear-text", "html", "json"]
 }

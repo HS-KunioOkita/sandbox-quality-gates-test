@@ -4,5 +4,5 @@
   "vitest": { "configFile": "vitest.config.ts", "related": true },
   "mutate": ["src/**/*.{ts,tsx}", "!src/**/*.test.{ts,tsx}", "!src/main.tsx"],
   "incremental": false,
-  "thresholds": { "high": 80, "low": 60, "break": null }
+  "thresholds": { "high": 80, "low": 60, "break": 50 }
 }
