@@ -154,6 +154,10 @@ export function judge(expected, actual) {
   const detectingLayers = [...new Set(detectedBy.map(layerOfGate))];
 
   if (errored.length > 0) {
+    // 捨てるのは推論であって観測ではない。判定（claimVerdict 等）は放棄するが
+    // （設計書 §6.1）、blockedBy / detectedBy は実測値なのでそのまま返す。
+    // detectedBy を空配列に潰すと、run-all.sh:129 が組み立てる「実際に止めた層」列で
+    // ⚠️ 行のブロックしたゲートだけが残り、非ブロックゲートの検出が消える。
     return {
       claimVerdict: 'inconclusive',
       claimGateVerdict: 'inconclusive',
@@ -161,8 +165,8 @@ export function judge(expected, actual) {
       errored,
       blockedBy,
       blockingLayers,
-      detectedBy: [],
-      detectingLayers: [],
+      detectedBy,
+      detectingLayers,
       mismatches: [],
       detectionMismatches: [],
     };

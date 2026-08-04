@@ -350,4 +350,64 @@ test('claimed_gate が非ブロックゲートで、検出しなければ mismat
 
   assert.equal(result.claimGateVerdict, 'mismatch');
   assert.equal(result.claimVerdict, 'not-caught');
+  // 「検出しなかった」ケースは blockedBy も detectedBy も空になるので、上の 2 行だけでは
+  // 新旧どちらの実装でも通ってしまう（§1.13 の「何も固定していないテスト」）。
+  // detectedBy / detectingLayers が undefined ではなく空配列として報告されることまで
+  // 固定して、新実装でしか成立しない形にする。
+  assert.deepEqual(result.detectedBy, []);
+  assert.deepEqual(result.detectingLayers, []);
+});
+
+test('claimed_gate が非ブロックゲートのとき、同じ層の別ゲートが止めても not-caught になる', () => {
+  // 申し送り #25 の規約: claimed_gate が非ブロックゲートなら「検出したか」で判定する。
+  // 名指しされた l2-new-deps が検出していない以上、同じ L2 の l2-semgrep が
+  // たまたま止めても「主張どおりに捕まえた」ことにはならない。
+  // 「止めたか」で判定する旧実装ではここが match になる。
+  const expected = {
+    id: 'L2-04-new-dependency',
+    pitfall: '実在する新規依存を追加する',
+    claimedLayer: 'L2',
+    claimedGate: 'l2-new-deps',
+    expect: { 'l2-semgrep': 'fail' },
+    expectDetection: { 'l2-new-deps': true },
+  };
+  const actual = {
+    'l2-semgrep': { code: 1, detected: '-', summary: '' },
+    'l2-new-deps': { code: 0, detected: 'false', summary: '' },
+  };
+
+  const result = judge(expected, actual);
+
+  assert.equal(result.claimVerdict, 'not-caught');
+  assert.equal(result.claimGateVerdict, 'mismatch');
+  assert.deepEqual(result.detectedBy, []);
+  // expect_detection が true を期待しているのに実測が false なので設定ずれとして記録される
+  assert.equal(result.configVerdict, 'mismatch');
+  assert.deepEqual(result.detectionMismatches, [
+    { gate: 'l2-new-deps', expected: true, actual: false },
+  ]);
+});
+
+test('error(2) があっても非ブロックゲートの検出は観測値として残る', () => {
+  // 早期リターンで捨てるのは推論（claimVerdict）であって観測ではない。
+  // detectedBy を空配列に潰すと run-all.sh の「実際に止めた層」列から
+  // 非ブロックゲートの検出だけが消える。
+  const expected = {
+    id: 'X', pitfall: 'p', claimedLayer: 'L2', claimedGate: '',
+    expect: { 'l3-test': 'pass' }, expectDetection: { 'l2-new-deps': true },
+  };
+  const actual = {
+    'l3-test': { code: 2, detected: '-', summary: 'docker が起動していない' },
+    'l2-semgrep': { code: 1, detected: '-', summary: '' },
+    'l2-new-deps': { code: 0, detected: 'true', summary: '' },
+  };
+
+  const result = judge(expected, actual);
+
+  assert.equal(result.claimVerdict, 'inconclusive');
+  assert.deepEqual(result.errored, ['l3-test']);
+  assert.deepEqual(result.detectedBy, ['l2-new-deps']);
+  assert.deepEqual(result.detectingLayers, ['L2']);
+  // ブロック側の観測が残ることは従来どおり
+  assert.deepEqual(result.blockedBy, ['l2-semgrep']);
 });
