@@ -10,25 +10,20 @@ expect:
   l1-lint: pass
   l2-semgrep: pass
   l2-osv: pass
-  # 実測: fail。L2-04 自身の差分に秘密は無い。原因は l4-mutation が Phase 4 で
-  # 持ち込んだ副作用: apps/api/reports/mutation/mutation.json
-  # (mutation.html も同様) は gitignore 済みで run-case.sh の cleanup（git checkout /
-  # branch -D）でも消えず、ミューテートしたソースファイルの全文（コメント含む）を
-  # 埋め込む。.gitleaks.toml の allowlist にこのパスが無いため、l2-gitleaks は
-  # --no-git で working tree 全体を素直に走査してこれを拾う。run-all.sh は
-  # verification/cases/*/ をアルファベット順に実行するため、必ず直前に
-  # L2-03-hardcoded-secret（orders.service.ts に PAYMENT_API_KEY /
-  # PAYMENT_API_SECRET を追加するケース）が走る。その l4-mutation が
-  # orders.service.ts をミューテートしてレポートに秘密文字列を埋め込んだまま
-  # 残り、L2-04（同じ orders.service.ts を touch する）の l2-gitleaks 実行時点
-  # （l4-mutation より前のゲート順）でまだ上書きされていないためこの leak を検出する。
-  # 実測で再現: run-case.sh L2-03 → run-case.sh L2-04 の順で単体実行すると
-  # l2-gitleaks=1（leaks found: 2）。L2-04 を単独実行（直前が L2-03 でない）
-  # すると l2-gitleaks=0（pass）に戻る。Phase 3 には l4-mutation が無く
-  # reports/mutation/ も生成されなかったため、この経路は Phase 4 で新たに
-  # 持ち込まれたものである。run-all.sh の固定実行順（アルファベット順）のもとでは
-  # 再現性がある「実測」として fail と書く。
-  l2-gitleaks: fail
+  # Phase 3 からの値（pass）に戻した。Task 5 で一時的に fail と書いていたが、これは
+  # L2-04 自身の性質ではなく、l4-mutation が Phase 4 で持ち込んだケース間汚染の
+  # 副作用だった: apps/api/reports/mutation/mutation.json（mutation.html も同様）は
+  # gitignore 済みで run-case.sh の cleanup でも消えず、ミューテートしたソース
+  # ファイルの全文を埋め込む。run-all.sh はケースをアルファベット順に実行するため
+  # 必ず直前に L2-03-hardcoded-secret が走り、その l4-mutation が
+  # orders.service.ts（L2-03 が追加した秘密文字列を含む）をミューテートしてレポートに
+  # 埋め込んだまま残り、同じファイルを touch する L2-04 の l2-gitleaks
+  # （ゲート順で l4-mutation より前）がそれを検出していた（node_modules の持ち越し、
+  # 申し送り #17 と同型）。run-case.sh の cleanup で apps/api/reports/mutation を
+  # 削除するよう修正し（コミット 74fcab1）、この汚染経路を断った。修正後は
+  # L2-03 → L2-04 の順で実行しても L2-04 単体で実行しても l2-gitleaks は pass で
+  # 一致することを実測で確認済み。
+  l2-gitleaks: pass
   l3-test: pass
   l3-openapi-drift: pass
   # 予測: fail。case.patch は orders.service.ts に dayjs を使う定数とフィールドを
