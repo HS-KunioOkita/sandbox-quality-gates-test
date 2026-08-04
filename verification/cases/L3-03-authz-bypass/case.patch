@@ -1,7 +1,39 @@
+diff --git a/apps/api/src/orders/orders.controller.ts b/apps/api/src/orders/orders.controller.ts
+index 65dfa12..392010a 100644
+--- a/apps/api/src/orders/orders.controller.ts
++++ b/apps/api/src/orders/orders.controller.ts
+@@ -30,10 +30,7 @@ export class OrdersController {
+   /** 認証済みユーザー自身の注文を 1 件取得 */
+   @Get(':id')
+   @ApiOkResponse({ type: OrderResponseDto })
+-  findOne(
+-    @Req() request: AuthenticatedRequest,
+-    @Param('id') id: string,
+-  ): Promise<OrderResponseDto> {
+-    return this.ordersService.findOneForUser(request.userId, id);
++  findOne(@Param('id') id: string): Promise<OrderResponseDto> {
++    return this.ordersService.findOneForUser(id);
+   }
+ }
 diff --git a/apps/api/src/orders/orders.service.ts b/apps/api/src/orders/orders.service.ts
-index 4fc94c6..674899d 100644
+index 4fc94c6..fe1d0eb 100644
 --- a/apps/api/src/orders/orders.service.ts
 +++ b/apps/api/src/orders/orders.service.ts
+@@ -1,4 +1,4 @@
+-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
++import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+ import { Prisma } from '@prisma/client';
+ import { applyDiscount } from '../discount/discount';
+ import { PrismaService } from '../prisma/prisma.service';
+@@ -42,7 +42,7 @@ export class OrdersService {
+    * 存在の有無を漏らさないため両方 404 に倒す設計もありうるが、ここでは
+    * 検証対象である手順書・設計書の記述（403 を返す経路を作る）に合わせる。
+    */
+-  async findOneForUser(userId: string, orderId: string): Promise<OrderResponseDto> {
++  async findOneForUser(orderId: string): Promise<OrderResponseDto> {
+     const order = await this.prisma.order.findUnique({
+       where: { id: orderId },
+       include: { user: true },
 @@ -51,9 +51,6 @@ export class OrdersService {
      if (order === null) {
        throw new NotFoundException('注文が見つかりません');

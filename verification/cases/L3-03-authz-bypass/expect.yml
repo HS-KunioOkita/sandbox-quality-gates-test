@@ -6,15 +6,20 @@ claimed_layer: L2
 # @UseGuards が付いているかしか見ないので、ガードは付いたまま所有者チェックだけが
 # 抜けたこのケースには反応しないと予想される。予想どおりなら §10 の割り当てへの
 # 反証データになる。claimed_layer は手順書の主張のままにする（絶対に変えない）。
+#
+# 注入方法（Task 10 で作り直し）: 初回実装は findOneForUser の所有者チェックだけを
+# 削り userId パラメータを残していたため、userId と ForbiddenException の import が
+# 未使用になり l1-typecheck / l1-lint が先に落ちるうえ、generate:openapi が
+# コンパイルできず l3-openapi-drift が error(2) になり判定不能（⚠️）だった。
+# 今回は userId パラメータごと削除し、Controller 側の呼び出し（findOne の
+# @Req() request 引数も含む）を合わせて未使用変数を無くした。欠陥の性質
+# （所有者チェックの欠落）と @UseGuards を残す設計は変えていない。
 claimed_gate: l2-semgrep
 expect:
   l2-install: pass
-  # 実測: userId が未使用パラメータになり、ForbiddenException の import も
-  # 未使用になる。base tsconfig の noUnusedParameters / noUnusedLocals が
-  # どちらも true なので tsc がここで先に止まる（TS6133 x2）。
-  l1-typecheck: fail
-  # 実測: 同じ未使用変数を eslint（@typescript-eslint/no-unused-vars）も検出する。
-  l1-lint: fail
+  # 実測: userId パラメータを削除したので未使用変数が発生せず、tsc は通る。
+  l1-typecheck: pass
+  l1-lint: pass
   # 実測: 147 ルール（コミュニティ + カスタム 1 件）で 0 findings。カスタムルール
   # nest-controller-without-guard は Controller の @UseGuards 有無しか見ないため
   # 無反応（予想どおり）。
@@ -24,6 +29,8 @@ expect:
   # 実測: test/orders.e2e-spec.ts の「他人の注文は 403 で拒否する」が
   # 200 を受け取って落ちる（Tests: 1 failed, 27 passed, 28 total）。
   l3-test: fail
+  # 実測: DTO 変更が無く generate:openapi のコンパイルも通るため、
+  # 生成物との差分は発生しない。
   l3-openapi-drift: pass
 expect_detection:
   l2-new-deps: false
