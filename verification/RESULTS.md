@@ -27,7 +27,7 @@
 
 | ケース | 落とし穴 | 手順書の主張 | 実際に止めた層 | 判定 |
 |---|---|---|---|---|
-| L1-01-eslint-disable-abuse | eslint-disable でファイル全体を黙らせる | L1 | l1-lint | ✅ 一致 |
+| L1-01-eslint-disable-abuse | eslint-disable でファイル全体を黙らせる | L1 | l1-lint, l4-mutation | ✅ 一致 |
 | L1-02-explicit-any | any で型チェックを回避する | L1 | l1-lint | ✅ 一致 |
 | L1-03-floating-promise | await 忘れで Promise を放置する | L1 | l1-lint, l3-test | ✅ 一致 |
 | L1-04-unused-disable | 効いていない eslint-disable を残す | L1 | l1-lint | ✅ 一致 |
@@ -35,8 +35,8 @@
 | L1-06-web-imports-api | Web から API の内部実装を直接 import する | L1 | （なし） | ❌ どの層も止めなかった |
 | L2-01-phantom-package | 存在しないパッケージを import する | L2 (l2-osv) | l2-install, l2-new-deps（検出のみ） | ❌ 層は一致・主張したツールは無反応 |
 | L2-02-guard-missing | Controller から認可ガードを外す | L2 (l2-semgrep) | l2-semgrep, l3-test | ✅ 一致 |
-| L2-03-hardcoded-secret | API キーらしき文字列をハードコードする | L2 | l2-semgrep, l2-gitleaks | ✅ 一致 |
-| L2-04-new-dependency | 実在する新規依存を追加する | L2 (l2-new-deps) | l2-new-deps（検出のみ） | ✅ 一致 |
+| L2-03-hardcoded-secret | API キーらしき文字列をハードコードする | L2 | l2-semgrep, l2-gitleaks, l4-mutation | ✅ 一致 |
+| L2-04-new-dependency | 実在する新規依存を追加する | L2 (l2-new-deps) | l2-gitleaks, l4-mutation, l2-new-deps（検出のみ） | ✅ 一致 ※設定ずれ: l2-gitleaks 期待 pass → 実測 fail |
 | L2-05-sql-injection | $queryRawUnsafe で文字列連結して SQL を組み立てる | L2 (l2-semgrep) | l3-test | ❌ 別の層が止めた |
 | L3-01-broken-logic | 割引計算のロジックを壊す | L3 (l3-test) | l3-test | ✅ 一致 |
 | L3-02-openapi-drift | DTO を変更して OpenAPI 生成物を更新しない | L3 (l3-openapi-drift) | l3-openapi-drift | ✅ 一致 |
