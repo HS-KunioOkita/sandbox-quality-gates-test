@@ -26,6 +26,15 @@ WORK=$(mktemp -d)
 # なり、表が全部 ✅ で埋まる。たとえば main 側に lint エラーが 1 つ混入するだけで、
 # 全ケースが blockedBy: [l1-lint] で match を返す。ケースの判定は、この対照が
 # 取れていることの上でしか意味を持たない。
+
+# ケース別・全体の経過時間を計測する（申し送り #26）。ログにタイムスタンプが
+# 無く「実行者の申告とログの mtime しか根拠が無い」状態を解消するのが目的なので、
+# 外部コマンド（date 等）を呼ばずに済む bash 組み込みの SECONDS を使う。
+# 計測の開始は**対照実行の前**に置く。ここより後ろに置くと、末尾が出す
+# 「全体の所要時間」が 8 ゲート分の対照実行を丸ごと落とした値になる。
+ALL_STARTED=$SECONDS
+baseline_started=$SECONDS
+
 printf '=== baseline（パッチ無し） ===\n' >&2
 for gate in "${GATE_ORDER[@]}"; do
   "./scripts/gates/$gate.sh" >"$WORK/baseline-$gate.log" 2>&1
@@ -39,6 +48,9 @@ for gate in "${GATE_ORDER[@]}"; do
     exit 2
   fi
 done
+# ケースごとの `--- %s: %s 秒 ---` と同じ体裁で対照実行の所要も出す。TSV には
+# 列を足さない（parseActual が 4 列目以降を summary として結合するため。§1.38）。
+printf -- '--- baseline: %s 秒 ---\n' "$((SECONDS - baseline_started))" >&2
 
 {
   printf '# 検証結果マトリクス\n\n'
@@ -73,11 +85,6 @@ done
   printf '| ケース | 落とし穴 | 手順書の主張 | 実際に止めた層 | 判定 |\n'
   printf '|---|---|---|---|---|\n'
 } >"$WORK/head.md"
-
-# ケース別・全体の経過時間を計測する（申し送り #26）。ログにタイムスタンプが
-# 無く「実行者の申告とログの mtime しか根拠が無い」状態を解消するのが目的なので、
-# 外部コマンド（date 等）を呼ばずに済む bash 組み込みの SECONDS を使う。
-ALL_STARTED=$SECONDS
 
 shopt -s nullglob
 for case_dir in verification/cases/*/; do
