@@ -830,13 +830,65 @@ l3-openapi-drift  pass（generate:openapi のコンパイルが通り、DTO も�
 
 **どちらも `claimVerdict` / `claimGateVerdict` には影響していない。** `L1-03` は `l1-lint` が、`L2-02` は `l2-semgrep` が先に捕まえており、判定は両方とも `match` のままである。しかし `expect` 上は `l3-test` も同時に fail しており、**`l3-test` は「その層固有の欠陥だけ」を見ているわけではない。**
 
-原因は具体的にはそれぞれ異なる。`L1-03` は `await` していない `this.prisma.user.findUnique(...)` の呼び出しが `create()` に混入することで、`orders.service.spec.ts` の `create` 関連アサーションか統合テスト（`test/orders.int-spec.ts`）のいずれかを壊す（Prisma のモック呼び出し回数・引数の想定が変わるため）。`L2-02` はガードを外すと `test/orders.e2e-spec.ts` の「認証なしは 401 を返す」e2e テストが 200 を受け取って落ちる。
+原因はそれぞれ異なる。**どのテストが落ちたかまで `l3-test` のログで実測した。**
+
+`L1-03-floating-promise` — 落ちるのは unit の 2 件だけで、**統合テスト（`test/orders.int-spec.ts`）は落ちていない。**
+
+```
+FAIL unit src/orders/orders.service.spec.ts
+  ● OrdersService › create › 作成した注文を割引適用後の合計付きで返す
+  ● OrdersService › create › userId を紐付けて作成し、user を同時に取得する
+Tests: 2 failed, 26 passed, 28 total
+```
+
+`await` していない `this.prisma.user.findUnique(...)` を `create()` に混入させるため、Prisma モックの呼び出し想定（回数・引数）が変わる。
+
+`L2-02-guard-missing` — 落ちるのは e2e の 4 件で、**401 を期待するテストだけではない。**
+
+```
+FAIL e2e test/orders.e2e-spec.ts
+  ● Orders (e2e) › 自分の注文は 200 で取得できる
+  ● Orders (e2e) › 存在しないユーザーの注文作成は 400 を返す
+  ● Orders (e2e) › x-user-id が無ければ 401 を返す
+  ● Orders (e2e) › x-user-id が無ければ個別取得も 401 を返す
+Tests: 4 failed, 24 passed, 28 total
+```
+
+ガードを外すと `request.userId` が実行時 `undefined` になるので、認証を期待するテスト（401）だけでなく**正常系（200 / 400）も同時に落ちる**。§2.1 に記録した「Prisma が `where: { userId: undefined }` を条件なしと解釈して全ユーザーの注文を返す」挙動がそのまま観測されている。
+
+**この 2 件が示すのは、`l3-test` の fail が「どの層の欠陥か」を語らないだけでなく、落ちるテストの本数や種類も欠陥の性質から素直には予測できないということである。** `L2-02` では「認可の欠落」という 1 つの欠陥が、認可を検証するテスト 2 件と、認可とは無関係な正常系のテスト 2 件を同時に落としている。
 
 **つまり `expect` に書かれる各ゲートの pass/fail は、層の独立性を示す指標ではない。** 同じ欠陥が複数の層で同時に検出されることは珍しくなく、`l3-test` のように**後段の広いテストスイート**は前段の層（L1 の実装バグ、L2 の認可欠落）が引き起こす副作用も一緒に拾ってしまう。
 
 手順書 §0 が置く「層を重ねる」という設計原則に対して、これは**層の間に強い相関がある**ことの実測データになる。ただし §1.27（L1 系のケースに L2 のゲートが 1 つも反応しなかった、否定的結果）と合わせて読むと、相関は一方向的である可能性が見える。**前段の層（L1 / L2）は後段固有の欠陥には反応しないが、後段の層（L3）は前段の欠陥が引き起こす副作用には反応しうる。** これは L3 が単体テスト・統合テスト・e2e テストという「実装の挙動全体」を検証する層であるのに対し、L1 / L2 は静的解析という「特定の観点」に限定された層である、という層の性質の違いによるものと考えられる。
 
 **手順書への提案**：§0 または §10 に、「層を重ねる」ことの効果は「同じ欠陥が複数の層で多重に検出されうる」ことも含む旨を明記する。特に L3（テスト）は他層の欠陥の副作用も拾いうるため、`expect` のようなゲート単位の pass/fail だけを見て「この欠陥はこの層の専売」と解釈しないよう、Phase 6 のレポートで注意喚起する。
+
+### 1.43 手順書 §4.6 の `--filter='...[origin/main]'` は、ゲートとして使うと「何が走ったか分からない緑」を作る
+
+手順書 §4.6 はテストの実行コマンドを `pnpm turbo test --filter='...[origin/main]'` としている。差分のあったパッケージとその依存元だけを走らせて CI 時間を削る、turbo の標準的な使い方である。
+
+**`l3-test.sh` にはこのフィルタを入れなかった。** 検証ハーネス（`run-case.sh`）は `main` から切った一時ブランチ（`verify/<CASE-ID>`）の上でゲートを回す。`...[origin/main]` は `origin/main` との差分を見るので、
+
+- `origin` に push していないコミット（このブランチで積んだ Phase 3 のコミット群）がすべて差分に入る
+- 走る範囲がケースの内容ではなく**そのときのブランチの位置と push 状況**で決まる
+- したがって `l3-test` が緑だったとき、それが「テストが通った」のか「対象パッケージが選ばれず何も走らなかった」のかを exit code から区別できない
+
+**これはこのリポジトリが繰り返し踏んでいる「ゲートが緑」と「ゲートが守っている」を区別できない形そのもの**なので、判定に使うゲートとしては採用できない。`l3-test.sh` はフィルタを外し、常に全パッケージ（api / web）を走らせている。
+
+**「対象 0 件でも緑になる」ことは実測した。** 差分が空になるフィルタを渡すと、turbo はタスクを 1 つも実行せずに exit 0 を返す。警告は出るが exit code は成功と区別できない。
+
+```
+$ pnpm turbo test --filter='...[HEAD]'
+   • Packages in scope: //
+   • Running test in 1 packages
+ WARNING  No tasks were executed as part of this run.
+ Tasks:    0 successful, 0 total
+$ echo $?
+0
+```
+
+**手順書への提案**：§4.6 に、`--filter='...[origin/main]'` が「`origin/main` が最新で、比較対象のブランチが push 済み」という前提の上に立つ最適化であることを明記する。加えて、**フィルタ付きのテストコマンドをブロッキングゲートに使う場合、「対象 0 件」と「全件成功」がどちらも exit 0 になる**点を注意喚起する。CI 時間の削減としては妥当な指示だが、ゲートの意味論としては穴がある。ゲートに使うなら、実行されたタスク数が 0 でないことを別途確認する必要がある。
 
 ---
 
@@ -940,7 +992,20 @@ Phase 2 の各タスクで `minor (deferred)` として記録したものを最�
 
 ---
 
-### Phase 3（L3）
+### Phase 3（L3）— 完了済み
+
+| # | 内容 | 対応状況 |
+|---|---|---|
+| 9 | `AuthGuard` の単体テストが無い | **解消**（Task 4）。単体テストと 401 の e2e を追加した |
+| 10 | `client.ts` の無検証キャスト | **一部解消**（Task 6）。`OrderView` を生成型（`paths['/orders']['get']...`）から導出したので、API 側の DTO が変われば Web 側が型エラーになる。ただし `(await response.json()) as OrderView[]` という**実行時の無検証キャストは残っている**（型と実データの一致は誰も確認していない） |
+| 11 | Playwright MCP の `.playwright-mcp/` | **対応済み**（Phase 0 時点で `.gitignore` にある） |
+| 12 | `create` が存在しないユーザー ID で 500 を返す | **解消**（Task 3）。まず 500 を実測してから P2003 を `BadRequestException`（400）に写像した。§1.30 |
+| 24 | `l1-typecheck.sh` の fail code は tsconfig の形に依存 | **遵守中**（恒久的な制約）。Phase 3 は tsconfig を触った（`jest.config.ts` の `projects` 化に伴う `include` 追加）ので、Task 1 の受け入れ条件に `./verification/run-case.sh L1-05-unchecked-index` の再実行を入れ、`l1-typecheck: fail` を保っていることを実測した |
+| 25 | `claimed_gate` が非ブロックゲートを扱えない | **解消**（Task 8）。`judge.mjs` に `detectedBy` / `detectingLayers` を足し、`expect_detection` を `judge()` から参照させた。`L2-04-new-dependency` の判定は ❌ → ✅ になった |
+| 26 | `run-all.sh` の所要時間 | **解消**（Task 8 + 実測）。経過秒数を stderr に出す実装を入れ、全 14 ケースで **6 分 1 秒**と実測した。#26 が挙げた高速化候補（semgrep のキャッシュ、Docker の事前 pull、並列化）は現時点では不要と判断。§1.38 |
+| 27 | ルール ID 照合（#20 から継続） | **未解決。** Phase 3 では対象外と決定した。下の Phase 4 節に持ち越す |
+
+以下は Phase 3 着手前の原文（記録として残す）。
 
 | # | 内容 |
 |---|---|
@@ -960,6 +1025,17 @@ Phase 2 の各タスクで `minor (deferred)` として記録したものを最�
 | 13 | **`turbo` の `dependsOn` は turbo 経由でのみ効く。** 手順書 §5.3 の `scripts/stryker-diff.sh` は `pnpm --filter api exec stryker` を直叩きするため `generate` を経由しない。ゲートスクリプトは turbo 経由にするか、明示的に `generate` を先行させる必要がある |
 | 14 | `toOrderResponse` は `orders.service.ts` のファイルローカル関数。`*.module.ts` でもエントリポイントでもないので `mutate` から除外しない |
 | 15 | `apps/web` の Vitest は `afterEach(cleanup)` を明示登録済み。これが無いとテスト間で DOM が蓄積し、自分の render を検証しないテストが mutant を殺せなくなる（Phase 0 で実測・修正済み） |
+
+以下は Phase 3 の実測を受けて追加した分。
+
+| # | 内容 |
+|---|---|
+| 27 | **ルール ID 照合は依然として未解決**（#20 → #27 から継続）。`claimed_gate` でゲート粒度までは上がったが、同じゲート内でどのルールが落としたかは見ていない。`l2-semgrep` は 147 ルールを走らせるので、意図したカスタムルールが発火したのか `p/owasp-top-ten` の別ルールが発火したのかを区別できない。Phase 3 で `l3-test` が加わって**この穴は広がった**（§1.42 のとおり、`l3-test` の fail はどのテストが落ちたかを判定に伝えていない。今回はログを人手で読んで特定した）。ルール ID を出す層（semgrep の JSON 出力、ESLint の `--format json`、Jest の `--json`）は既にあるので、`actual.tsv` に列を足すのが最短。ただし `parseActual` は 4 列目以降を `summary` として結合するので、列の追加は `judge.mjs` 側の変更を伴う（§1.38） |
+| 28 | **Stryker は `l3-test` と同じテストを mutant ごとに回す。** Phase 3 で `test/*.int-spec.ts` / `test/*.e2e-spec.ts` が Testcontainers 経由で PostgreSQL コンテナを起動するようになった（`apps/api/test/setup-db.ts` の `beforeAll`）。**Jest の `projects` のうち `unit` だけを走らせる手当てをしないと、コンテナ起動が mutant の数だけ走って破滅的に遅くなる。** 絞り方（Stryker の jest runner に渡す設定か、`projects` を分けた別 config か）は Phase 4 で実測して決める。手順書 §5 はこの相互作用に触れていない |
+| 29 | **`mutate` からの除外候補が Phase 3 で増えた。** `apps/api/src/main.ts`（`ValidationPipe` と Swagger の配線）と `apps/api/src/openapi.ts`（OpenAPI 生成のエントリポイント）はテストが直接叩かないので mutant が生き残る。#14（`toOrderResponse` は除外しない）と併せて判断する |
+| 30 | **ゲートが 8 本になった。`GATE_ORDER` に L4 を足すときは `scripts/gates/gates.list.sh` の 1 箇所だけを直す**（#18 で集約済み）。`l3-e2e-web`（Playwright）は意図的に `GATE_ORDER` の外に置いてあるので、L4 を足すときに一緒に拾わないこと（§1.35） |
+| 31 | **依存を 1 つ足すと別の層のゲートが赤くなる。** Phase 3 で 2 回起きた（§1.34 の js-yaml、§1.39 の brace-expansion）。Stryker の追加は依存ツリーを大きく増やすので、**`l2-osv` が新しい High 脆弱性で赤くなること**と**`minimumReleaseAge: 10080` が `pnpm add` を拒否すること**の両方を想定して着手する。回避策は `minimumReleaseAgeExclude` と `overrides`（§1.21 / §1.39）。なお `pnpm add` が拒否されたとき、**サブエージェントの操作が権限分類器に拒否されたら人間に判断を仰ぐ**という §4 の運用ルールが適用される |
+| 32 | **`l3-test.sh` は `pnpm turbo test` として実装した**（#13 の回避）。L4 のゲートも turbo 経由にすること。加えて、手順書が書く `--filter='...[origin/main]'` は**対象 0 件でも exit 0 になる**ので、ブロッキングゲートには入れないこと（§1.43） |
 
 ---
 
@@ -1050,3 +1126,57 @@ Phase 2 の各タスクで `minor (deferred)` として記録したものを最�
 - 人間の判断材料として提示した事実: パッチが触るのは `apps/api/package.json`(+1) / `pnpm-lock.yaml`(+8) / `orders.service.ts` のみ、**`pnpm-workspace.yaml` は無変更で `minimumReleaseAge: 10080` は残っている**、`dayjs@1.11.21` は 7 日ルールを単体では満たす（発火原因は無関係な `@turbo/linux-arm64`）、オーバーライドは 1 回限りで設定ファイルには何も書かれていない
 
 **今後の運用ルール（後続フェーズに適用）**：**サブエージェントの操作が権限分類器に拒否されたら、コントローラが自セッションで同じことを実行して引き渡してはいけない。** 人間に判断を仰ぐこと。自セッションで許可されるかどうかは判断材料にしない。
+
+### Phase 3（L3 + L3 系 3 ケース）
+
+| 項目 | 結果 |
+|---|---|
+| `./scripts/gates/gates.test.sh` | exit 0。**35 件成功**（Phase 2 は 27 件。新規ゲート 2 本の pass / fail / error 経路と呼び出し位置非依存を追加） |
+| `node --test verification/lib/judge.test.mjs` | exit 0。**26 件成功**（Phase 2 は 22 件。非ブロックゲート照合の 2 件を含む） |
+| `shellcheck scripts/gates/*.sh verification/*.sh` | exit 0（指摘 0） |
+| `pnpm turbo typecheck` | exit 0。5 タスク成功 |
+| `pnpm lint`（`eslint . --max-warnings=0`） | exit 0 |
+| `pnpm turbo test`（`l3-test` ゲート経由） | exit 0。**api 28 テスト**（Phase 2 は 13）＋ web 10 テスト |
+| `./verification/run-all.sh` | 対照実行が通り、14 ケースすべて判定。所要 **6 分 1 秒**（申し送り #26 の「概ね 40 分」推定を実測で置き換えた。§1.38） |
+| `./verification/run-all.sh` 実行後の状態 | 作業ツリークリーン、`verify/*` ブランチ残存なし |
+| 仮説 8（Testcontainers） | 結論を §1.29 に記録（**手順書のコードは動かない**。`prisma migrate deploy` の一手が要る） |
+| 既存 L1 系 6 ケースの退行 | **なし。** ゲートが 7 本から 8 本に増えても `claimVerdict` は Phase 1 / Phase 2 と同一 |
+| 既存 L2 系 5 ケースの変化 | `L2-04` が ❌ → ✅（申し送り #25 の解消による。§1.26）、`L2-05` が「どの層も止めなかった」→「`l3-test` が止めた」（❌ のまま。§1.40）。**いずれも `claimed_layer` は変えていない** |
+
+**Phase 3 で確定した検証ケース 3 本**（`verification/cases/`）
+
+| ケース | 落とし穴 | 手順書の主張 | 止めたゲート | 判定 |
+|---|---|---|---|---|
+| `L3-01-broken-logic` | 割引計算のロジックを壊す | L3（`l3-test`） | `l3-test` | ✅ |
+| `L3-02-openapi-drift` | DTO を変更して OpenAPI 生成物を更新しない | L3（`l3-openapi-drift`） | `l3-openapi-drift` | ✅ |
+| `L3-03-authz-bypass` | 認可チェック（所有者確認）が欠落する | L2（`l2-semgrep`） | `l3-test` | ❌ **別の層が止めた。手順書 §10 への反証データであり、意図した結果である**（§1.41） |
+
+**全 14 ケースの内訳: ✅ 10 行 / ❌ 4 行 / ⚠️ 0 行。** ❌ の 4 件は次のとおり。
+
+| ケース | ❌ の内容 | `claimVerdict` | 記録先 |
+|---|---|---|---|
+| `L1-06-web-imports-api` | どの層も止めなかった | `mismatch` | §1.9 |
+| `L2-01-phantom-package` | 層は一致・主張したツール（`l2-osv`）は無反応 | **`match`**（`claimGateVerdict` のみ `mismatch`） | §1.19 |
+| `L2-05-sql-injection` | 別の層（`l3-test`）が止めた | `mismatch` | §1.17 / §1.40 |
+| `L3-03-authz-bypass` | 別の層（`l3-test`）が止めた | `mismatch` | §1.41 |
+
+**`claimVerdict` が `mismatch` なのは 3 件で、❌ 表示の 4 行とは一致しない。** `L2-01` は「手順書 §10 が主張する層（L2）は確かに止めたが、ケースが名指しした `l2-osv` は無反応だった」という状態で、層の主張は成り立っている。Phase 6 のレポートで件数を挙げるときは、どちらの数字を指しているのかを明示すること。
+
+#### Phase 3 で見送った Minor（triage 済み）
+
+各タスクで `minor (deferred)` として記録したものを最後に仕分けした。**いずれも現時点で誤った判定を生んでおらず、Phase 3 の完了条件に関わらない。**
+
+| 内容 | 仕分け |
+|---|---|
+| `L3-03` の `l2-osv` / `l2-gitleaks` が未実測の推測値だった | **解消**（本タスク）。`run-case.sh` / `run-all.sh` の代行実行で両方 exit 0（pass）を実測した |
+| `l3-test.sh` のコメント内の説明表現 `'Test suites?:.*failed'` が実物の見出し `Test Suites:` と表記が違う | **様子見。** コメントの表記のみで、実際の判定に使う正規表現（`'Tests:.*[0-9]+ failed'`）は実測済み |
+| `l3-e2e-web.sh` のパターン `'[0-9]+ failed'` が `l3-test.sh` の `'Tests:.*[0-9]+ failed'` よりアンカーが緩い | **`GATE_ORDER` に入れる時点で対処する。** 現状は判定に使っていないので実害なし（§1.35） |
+| `playwright.config.ts` の `reuseExistingServer: true` が古いサーバを再利用しうる | **Phase 5 へ先送り**（nightly に組み込むときに判断する） |
+| `findOneForUser` の `orderId` に UUID 形式検証が無い（不正形式で 500 になりうる） | **様子見。** 既存の他エンドポイントも同様で、L3 系ケースを増やすときの題材候補になる |
+| `judge.test.mjs` の新規 2 テストが `detectingLayers` を検証していない | **様子見。** `detectedBy` は検証済みで、`detectingLayers` は `layerOfGate` を通すだけの派生値（同関数は既存テストが押さえている） |
+| `apps/api/test/*.spec.ts` の配列テストと無しヘッダテストが実装上同じ `if` 分岐を通る | **修正不要**（レビュアー判断）。異なる入力形状を固定する意味がある |
+| §1.31 に「`FC_NUM_RUNS` が読まれている」ことの生ログが無い | **様子見。** レビュアーの独自再実行で裏付けは取れている |
+| `openapi.ts` のキー順安定性の実測が 2 回の一致しか無い | **継続観察。** `l3-openapi-drift` が偽陽性を出し始めたらここを疑う |
+| `pnpm-workspace.yaml` のコメント整列が 2 度崩れた（原因未特定。`.prettierrc` / husky / lint-staged / `.git/hooks` を調べても不明） | **手で復元済み。原因は未解明のまま残る。** 実装者環境のフォーマッタが疑われるが確証は無い |
+| コミット粒度の逸脱 2 件（findings 追記が `fix:` コミットに同梱、ケース 3 本が 3 コミットにまとめられた） | **記録のみ。** 内容の充足には影響しない |
+| `pnpm-workspace.yaml` の既存コメントの時制をタスク範囲外で手直しした | **記録のみ。** 「触るのは自分の変更だけ」という原則からの小さな逸脱 |

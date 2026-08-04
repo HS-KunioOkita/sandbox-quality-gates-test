@@ -70,10 +70,19 @@
 
 ハーネス自身も例外ではない。ハーネスを変更したら、既に `match` だったケースを再実行して退行していないか確かめる（Phase 1 で実際に退行させた）。
 
+**ある層を足す作業が、別の層のゲートを赤くする。** Phase 3 で 4 回起きた。L3 の依存追加（`@nestjs/swagger` / `openapi-typescript`）が js-yaml の High 脆弱性を持ち込んで `l2-osv` を赤くし（§1.34）、Playwright のテストファイルが vitest の既定 include に拾われて `l3-test` を壊し、同じファイルが ESLint の `projectService` で解決できず `l1-lint` を壊し（§1.36 / §1.37）、`L3-03` の欠陥注入が `l1-typecheck` と `l3-openapi-drift` に同時に当たってケースを判定不能にした（§1.41）。**新しい層を足したら、既存の全ゲートを回すまで終わりではない。**
+
 ## 現在地
 
-Phase 0（モノレポ基盤とサンプルアプリ）、Phase 1（L1 ゲート + 検証ハーネス + L1 系 6 ケース）、Phase 2（L2 ゲート 4 本 + L2 系 5 ケース）が完了。次は Phase 3（L3）。
+Phase 0（モノレポ基盤とサンプルアプリ）、Phase 1（L1 ゲート + 検証ハーネス + L1 系 6 ケース）、Phase 2（L2 ゲート 4 本 + L2 系 5 ケース）、Phase 3（L3 ゲート 2 本 + L3 系 3 ケース）が完了。次は Phase 4（L4）。
 
-全 11 ケースの結果は `verification/RESULTS.md`。L1 系は Phase 1 から退行なし（5 件 ✅ / L1-06 のみ ❌）。L2 系 5 件は **2 件 ✅ / 3 件 ❌**。
+ブロックするゲートは 8 本（`scripts/gates/gates.list.sh` の `GATE_ORDER`）+ 非ブロック 1 本。Playwright（`l3-e2e-web.sh`）は**意図的に `GATE_ORDER` の外**に置いてある（`phase0-findings.md` §1.35）。
 
-**`RESULTS.md` の ❌ を読むときの注意**: `L2-04-new-dependency` の ❌ は**ハーネスの限界であって手順書の失敗ではない**。手順書 §3.3 の新規依存検出はブロックを意図しておらず、検出自体は正しく起きている。非ブロックゲートは exit code が常に 0 なので構造上 `blockedBy` に入らず、判定が `match` になりえない。詳細は `phase0-findings.md` §1.26。
+全 14 ケースの結果は `verification/RESULTS.md`（**✅ 10 行 / ❌ 4 行**）。L1 系は Phase 1 から退行なし（5 件 ✅ / L1-06 のみ ❌）。`run-all.sh` の所要は **6 分 1 秒**（Phase 2 時点の「概ね 40 分」という推定は厳密な計測ではなかった。§1.38）。
+
+**`RESULTS.md` の ❌ を読むときの注意**:
+
+- `L3-03-authz-bypass` の ❌ は**意図した結果であり、環境やハーネスの不具合ではない**。手順書 §10 は「認可チェックの欠落」を L2 の担当とし、その具体策として Semgrep カスタムルールを挙げるが、そのルールは Controller に `@UseGuards` が付いているかしか見ない。ガードを残したまま所有者チェックだけを外したこのケースには反応せず、`l3-test` が捕まえた。**手順書 §10 への反証データである**（§1.41）。
+- `L2-05-sql-injection` の ❌ も同型。Phase 3 で `l3-test` が捕まえるようになったが、**それは単体テストがクエリの呼び出し形を固定しているからで、SQL インジェクションを検出しているわけではない**（§1.40）。
+- ❌ の 4 行と「`claimVerdict` が `mismatch`」の 3 件は一致しない。`L2-01-phantom-package` は層の主張は成り立っており、ケースが名指しした `l2-osv` だけが無反応（§1.19）。
+- `L2-04-new-dependency` の ❌ は Phase 3 で解消した。`judge.mjs` に `detectedBy` / `detectingLayers` を足し、非ブロックゲートを「止めた」ではなく「検出した」として照合するようにした（§1.26）。
