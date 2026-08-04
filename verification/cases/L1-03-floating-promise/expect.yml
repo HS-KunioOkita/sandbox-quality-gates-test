@@ -8,5 +8,7 @@ expect:
   l2-semgrep: pass
   l2-osv: pass
   l2-gitleaks: pass
+  l3-test: pass
+  l3-openapi-drift: pass
 expect_detection:
   l2-new-deps: false
