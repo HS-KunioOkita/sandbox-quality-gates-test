@@ -9,6 +9,17 @@ const common = {
   moduleFileExtensions: ['ts', 'js', 'json'],
 } satisfies Partial<Config>;
 
+// Stryker からも参照する（jest.stryker.config.ts）。Stryker は mutant 1 つごとに
+// テストを回すので、Testcontainers を使う integration / e2e を含めてはいけない
+// （申し送り #28）。定義を 2 箇所に書くと片方だけ直す事故になるのでここを唯一の
+// 情報源にする。
+export const unitProject = {
+  ...common,
+  displayName: 'unit',
+  rootDir: '.',
+  testMatch: ['<rootDir>/src/**/*.spec.ts'],
+};
+
 const config: Config = {
   rootDir: '.',
   // 手順書 §4.1 は種別ごとにファイル名を分ける（*.int-spec.ts / *.e2e-spec.ts）。
@@ -17,12 +28,7 @@ const config: Config = {
   // 「テストを置いたのに Jest が拾わず緑のまま」は、このリポジトリが
   // 繰り返し踏んでいる「緑と守っているは別物」の型そのものである。
   projects: [
-    {
-      ...common,
-      displayName: 'unit',
-      rootDir: '.',
-      testMatch: ['<rootDir>/src/**/*.spec.ts'],
-    },
+    unitProject,
     {
       ...common,
       displayName: 'integration',
