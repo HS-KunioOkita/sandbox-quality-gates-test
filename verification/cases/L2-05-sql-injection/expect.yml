@@ -11,7 +11,12 @@ expect:
   l2-semgrep: pass
   l2-osv: pass
   l2-gitleaks: pass
-  l3-test: pass
+  # 実測: fail。$queryRawUnsafe への置き換えで findByUser の呼び出し形が変わり、
+  # orders.service.spec.ts が固定していた findMany 呼び出しのアサーションと
+  # test/orders.int-spec.ts が落ちる。SQL インジェクションそのものを検出した
+  # わけではなく、クエリ形の変化がテストのアサーションを壊した副作用である
+  # （claimed_layer/claimed_gate は変更しない。mismatch が成果物）。
+  l3-test: fail
   l3-openapi-drift: pass
 expect_detection:
   l2-new-deps: false

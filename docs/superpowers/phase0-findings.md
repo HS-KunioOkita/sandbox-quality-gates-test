@@ -503,6 +503,8 @@ Phase 2 で新たに確認したのは、**その対処が `--ignore-scripts` �
 
 **追記（Phase 3）**：上記の (a)（非ブロックゲート用の照合列を足す）を選択し解消した。`judge()` に `detectedBy` / `detectingLayers` を追加し、`claimed_gate` が非ブロックゲートを指す場合は `blockedBy` ではなく `detectedBy` で照合する規約にした。「止めた」と「検出した」は別概念なので `blockedBy` には混ぜず、`RESULTS.md` の表示でも「（検出のみ）」と注記して区別している。**`claimed_layer` は一切書き換えていない。** 手順書の主張（L2 が新規依存を検出する）はそのままで、ハーネス側が「検出」を測れるようになっただけである。詳細は `.superpowers/sdd/2026-08-03-phase3-l3-tests/task-8-report.md` を参照。
 
+**追記（Phase 3、実測確認）**：`./verification/run-case.sh L2-04-new-dependency` を実行し、上記の解消が実際に機能することを確認した。結果は `claimVerdict: match` / `claimGateVerdict: match` / `configVerdict: match`、`detectedBy: ["l2-new-deps"]`、`blockedBy: []`、`mismatches: []`。手で構成した `pnpm-lock.yaml` は `--frozen-lockfile` を通り（`errored` も空）、`l2-install` は pass のまま検出だけが成立した。Phase 2 の時点では構造上 `match` になりえなかったこのケースが、**`claimed_layer` / `claimed_gate` を一切書き換えずに** ✅ に転じた。これは「❌ の原因はハーネスの限界であって手順書の失敗ではない」という上記の見立てが、実測で裏付けられたことを意味する。
+
 ### 1.27 手順書 §10 の層の割り当てが排他的かどうかは、今回は反証が得られなかった（否定的結果）
 
 Phase 2 で L2 ゲートが 4 本増えたため、**L1 系のケースに L2 が反応する**（＝手順書 §10 の層の割り当てが排他的でない）ことを期待して観測した。
@@ -751,6 +753,30 @@ Phase 2 で `brace-expansion` の High 脆弱性（GHSA-mh99-v99m-4gvg）に対�
 今回は `minimumReleaseAgeExclude` に `brace-expansion` を追加して回避した（`@types/node` / `jsdom` に続く 3 例目、`pnpm-workspace.yaml` 参照）。しかし**除外リストが脆弱性のたびに増えていくなら、`minimumReleaseAge` は実質的に機能しなくなる。** 除外運用を無制限に続ければ「7 日待つ」という保護そのものが空文化する。
 
 **手順書への提案**：§3.3 に `minimumReleaseAge` を書くなら、脆弱性対応時の例外運用を必ず併記すること。具体的には (1) `minimumReleaseAgeExclude` の運用ルール（誰が・どういう基準で追加してよいか、追加した除外をいつ見直すか）、または (2) 脆弱性対応に起因する更新は `minimumReleaseAge` の対象外とする設定・運用のいずれかを明示する必要がある。「7 日待て」とだけ書いて例外運用に触れないのは、OSV-Scanner による脆弱性スキャンと正面から矛盾する。
+
+### 1.40 `L2-05-sql-injection` は Phase 3 で L3 に捕まるようになったが、これは「SQL インジェクションを検出した」ことを意味しない（副作用による検出）
+
+Phase 2 では `L2-05-sql-injection` は `blockedBy: []` で **❌ どの層も止めなかった**だった。手順書 §3.2 のルールセット（5 つのルールセット + カスタムルール、147 rules）を全て当てても `$queryRawUnsafe` への文字列連結には無反応だったことは §1.17 に記録済みで、この結論は変わらない。
+
+**Phase 3 で `l3-test` がこの欠陥を捕まえるようになった。** `./verification/run-case.sh L2-05-sql-injection` の実測は次のとおり。
+
+```
+claimVerdict     : mismatch
+claimGateVerdict : mismatch
+configVerdict    : mismatch
+blockedBy        : ["l3-test"]
+detectedBy       : []
+errored          : []
+mismatches       : [{"gate":"l3-test","expected":"pass","actual":"fail"}]
+```
+
+**ただし捕まえた理由は「SQL インジェクションだから」ではない。** `apps/api/src/orders/orders.service.spec.ts` は `findByUser` が `this.prisma.order.findMany({ where: { userId }, include: { user: true }, orderBy: { createdAt: 'desc' } })` という**呼び出しの形**をアサーションで固定している。`case.patch` はこの呼び出しを `$queryRawUnsafe` に置き換えるため、呼び出し形そのものが変わり、このアサーションが落ちる。Task 1 で追加した `test/orders.int-spec.ts`（実 DB に対する統合テスト）も同じ理由で影響を受ける。テストは SQL インジェクションの有無ではなく「Prisma の型安全なクエリビルダを経由しているか」を間接的に固定しているにすぎない。
+
+**これは findings §2.2 が `L5-02-n-plus-one` について述べている構造と同じである。** 「単体テストがクエリ形を固定していれば、実装の書き換えは L3 で捕まる」。裏を返せば、**クエリ形を固定していないコード（呼び出しの形が変わらない形で `$queryRawUnsafe` に差し替える、あるいはそもそも呼び出し形を固定するアサーションが無いコード）に同じ欠陥を入れれば、L3 は無反応になるはずである。** 今回 L3 が捕まえたのは「SQL インジェクションを検出する仕組みがあるから」ではなく、「たまたま既存のテストがクエリ形を固定していたから」であり、この 2 つを混同してはならない。
+
+手順書 §10 は SQL インジェクションを L2 の担当としているが、実測では L2（Semgrep）は無反応で、L3（テスト）が止めた。**ただし上記の理由から、これを「§10 の割り当てを L3 に変えるべきだ」という提案に直結させてはいけない。** 正しく併記すべきは次の 2 点である。(1) L2 のルールセット構成は SQL インジェクションを拾わない（§1.17、変わらない事実）。(2) L3 が今回拾ったのは、既存のテスト資産がクエリ形を固定するという設計判断の副作用であり、「L3 が SQL インジェクションを検出できる」という一般的な主張の根拠にはならない。
+
+**手順書への提案**：§3.2 に「このルールセット構成で拾えないもの」として生 SQL 組み立てを追加する提案は §1.17 のまま変更しない。加えて、**「テストがクエリ形を固定していれば副作用的に検出される」ことに依存する設計は再現性が無い**（テストの書き方を変えるだけで検出が消える）ため、SQL インジェクション対策を L3 の単体テストに委ねるのではなく、`$queryRawUnsafe` の使用自体を制限するカスタムルール（L1/L2）に寄せるべきという §1.17 の結論を補強するデータとして扱う。
 
 ---
 
