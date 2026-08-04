@@ -18,6 +18,26 @@ blockExoticSubdeps: true      # 推移的依存を信頼できない配布元か
 minimumReleaseAge: 10080      # 公開から 7 日（分）経っていない版は入れない
 trustPolicy: no-downgrade     # 更新でセキュリティ設定が引き下げられるのを防ぐ
 
+# 公開から 30 日（分）以上経った版の trust downgrade は無視する。
+#
+# Phase 4 の着手時に `pnpm --filter api add` が ERR_PNPM_TRUST_DOWNGRADE で失敗した。
+# 原因は semver@6.3.1 で、2023 年公開・provenance attestation 無し・6.x の上位版が
+# 存在しない。babel（@babel/core / @babel/plugin-proposal-decorators）が ^6.3.1 を
+# 要求する限り再発するため、**Stryker に限らず依存を 1 つも追加できない**状態だった。
+# 2 回目の実行では Stryker と無関係な apps/web の eslint-plugin-react-hooks 経由で
+# 同じエラーが出ており、既存の依存グラフ全体に及ぶブロックであることを実測している。
+#
+# pnpm install --frozen-lockfile（l2-install ゲート）は lockfile を再解決しないので
+# trust チェックが走らず、影響を受けない（実測: この設定を入れる前も exit 0 だった）。
+# 壊れていたのは新規解決だけである。
+#
+# 個別除外（trustPolicyExclude）ではなくこちらを選んだのは、「除外リストが依存追加の
+# たびに増えれば保護が空文化する」という minimumReleaseAgeExclude への批判が
+# trustPolicy にもそのまま当てはまるため。takeover のリスクが実際に高い「公開直後の
+# 版」に対する保護はこの設定でも残る。人間の判断で導入した（詳細は
+# docs/superpowers/phase0-findings.md の Phase 4 の項）。
+trustPolicyIgnoreAfter: 43200
+
 # minimumReleaseAge は「新しく追加しようとしている依存」だけでなく、既に固定している
 # 依存も lockfile を書き換える操作（pnpm add 等）のたびに再検証する。そのため、既存の
 # 固定依存が 1 つでも公開から 7 日未満だと、追加しようとしている依存自身が条件を

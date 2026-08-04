@@ -1121,6 +1121,7 @@ grep -E '^(--- |全体の所要時間)' /tmp/run-all-task7.log
 | **`l4-mutation` は L1 系・L2 系の欠陥でも fail する**（該当ケースがあれば。§1.42 の型が L4 にも及ぶこと） | Task 5 Step 7 |
 | **Stryker は初回テスト実行が緑でないと動かないため、L3 が赤いケースでは L4 は原理的に判定できない。** ハーネスに依存スキップを入れた理由と、入れなかった場合に何が起きるか（5 ケースが ⚠️） | Task 4 Step 5 / Task 5 Step 1 |
 | **依存追加が既存ゲートに与えた影響**（`l2-osv` が赤くなったか、`minimumReleaseAge` に阻まれたか。何も起きなかった場合も「起きなかった」と書く） | Task 1 Step 8 / Task 2 Step 6 |
+| **`trustPolicy: no-downgrade` は依存追加を全面的・恒久的にブロックした**（§1.21 の `minimumReleaseAge`、§1.39 の OSV との衝突に続く 3 例目）。`semver@6.3.1` が attestation を持たず 6.x の上位版も無いため、babel を持つこのリポジトリでは Stryker に限らず**どの依存も追加できなかった**。`pnpm install --frozen-lockfile`（`l2-install`）は lockfile を再解決しないので緑のままで、**ゲートが緑でも依存追加が不可能**という状態が成立していた。人間の判断で `trustPolicyIgnoreAfter: 43200`（30 日）を入れて解消した。手順書 §3.3 が pnpm 側の供給網設定に触れていない問題の 3 例目として記録する | Task 1 の 1 回目の派遣（BLOCKED）と `pnpm-workspace.yaml` のコミット |
 
 `§1.13`（「ゲートが緑」と「ゲートが守っている」は別物である）の観測回数を更新する。Phase 4 で踏んだ件数を数え、表に追記する。**踏まなかったなら「踏まなかった」と書く**（回数を盛らない）。
 
