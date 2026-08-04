@@ -1,7 +1,7 @@
 // 手順書 §4.2 のコードをそのまま置くと、DATABASE_URL の差し替えまでしか行われず
 // 空の DB に接続することになる。実測（仮説 8）で
 // 「The table `public.Order` does not exist in the current database.」を確認済み
-// （phase0-findings.md §1.21 に引用）。マイグレーション適用を追加して直す。
+// （phase0-findings.md §1.29 に引用）。マイグレーション適用を追加して直す。
 import { execFileSync } from 'node:child_process';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 
