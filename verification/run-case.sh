@@ -217,6 +217,35 @@ if [ "$(git rev-parse --abbrev-ref HEAD)" != "$BASE_BRANCH" ] \
   exit 2
 fi
 
+# l4-mutation（Stryker）が書く apps/api/reports/mutation/ を消す。
+#
+# mutation.json / mutation.html は --reporters html,json の既定出力先で、ミューテート
+# 対象ソースファイルの全文（コメント・リテラル含む）を埋め込む。このディレクトリは
+# .gitignore の `reports/` に含まれるため run-case.sh 冒頭のクリーンチェック（git status
+# --porcelain）には引っかからず、cleanup の git checkout / branch -D でも消えない
+# （git 管理下のファイルしか戻さないため）。結果、あるケースが秘密らしい文字列を含む
+# ファイルをミューテートすると、次のケースの l2-gitleaks（--no-git で working tree
+# 全体を走査する）がそれを拾ってしまう。
+#
+# 実測（Task 5）: run-case.sh L2-03-hardcoded-secret → run-case.sh L2-04-new-dependency
+# の順で実行すると、L2-04 自身の差分には秘密が無いにもかかわらず l2-gitleaks が
+# exit 1 になった。L2-03 の l4-mutation が orders.service.ts（L2-03 のパッチが追加した
+# 秘密文字列を含む）をミューテートしてレポートに埋め込み、それが L2-04 の実行時点
+# （ゲート順で l2-gitleaks は l4-mutation より前）でまだ上書きされず残っていたため。
+# node_modules の持ち越し（直下のコメント、申し送り #17）とまったく同じ型の
+# ケース間汚染である。
+#
+# apps/web 側は GATE_ORDER に mutation ゲートが無く、run-case.sh からは Stryker が
+# 走らないため対象に含めない（apps/web/reports/mutation/ は本ハーネスの実行では
+# 更新されないことを実測で確認済み）。
+#
+# 削除は固定の相対パス 1 つのみを扱う。変数展開に頼ると、展開結果が空になったときに
+# 意図しない場所を消す事故になりうる（例: "$x/reports" で $x が空だと /reports を
+# 狙う）ため、リテラルパスを直接検査してから消す。
+if [ -d apps/api/reports/mutation ]; then
+  rm -rf -- apps/api/reports/mutation
+fi
+
 # node_modules を元ブランチの状態に戻す。
 #
 # ゲートは検証ブランチの package.json / pnpm-lock.yaml で pnpm install を走らせるので、
