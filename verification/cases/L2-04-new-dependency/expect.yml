@@ -13,5 +13,11 @@ expect:
   l2-gitleaks: pass
   l3-test: pass
   l3-openapi-drift: pass
+  # 予測: fail。case.patch は orders.service.ts に dayjs を使う定数とフィールドを
+  # 追加するだけだが、差分限定 Stryker はファイル単位でミューテートするため対象は
+  # 同ファイル全体になる。同ファイルのフル実行スコアは 40.00%（閾値 50 を下回る）ため、
+  # 追加分がテストで覆われていなくても閾値割れという結果自体は変わらない見込み
+  # （run-all.sh で実測確認）。
+  l4-mutation: fail
 expect_detection:
   l2-new-deps: true

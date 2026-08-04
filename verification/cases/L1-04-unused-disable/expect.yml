@@ -10,5 +10,8 @@ expect:
   l2-gitleaks: pass
   l3-test: pass
   l3-openapi-drift: pass
+  # 実測: pass。discount.ts 単体のミューテーションスコアは 100.00%（mutant 12 件、
+  # 全killed）。閾値 50 を大きく上回る。
+  l4-mutation: pass
 expect_detection:
   l2-new-deps: false

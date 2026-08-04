@@ -10,5 +10,10 @@ expect:
   l2-gitleaks: pass
   l3-test: pass
   l3-openapi-drift: pass
+  # 実測: fail。差分限定 Stryker は orders.service.ts をファイル単位でミューテートする。
+  # 同ファイルのフル実行スコアは 40.00%（閾値 50 を下回る）で、この eslint-disable の
+  # 追加自体はロジックを変えていないが、閾値割れそのものは変わらず fail(1) になる
+  # （claimVerdict 自体は l1-lint で match のため影響なし）。
+  l4-mutation: fail
 expect_detection:
   l2-new-deps: false

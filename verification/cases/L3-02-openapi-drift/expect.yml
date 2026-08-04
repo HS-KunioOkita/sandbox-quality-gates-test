@@ -13,5 +13,12 @@ expect:
   l2-gitleaks: pass
   l3-test: pass
   l3-openapi-drift: fail
+  # 実測: pass。case.patch が触る order-response.dto.ts は mutant が 0 件
+  # （Instrumented 1 source file(s) with 0 mutant(s)）で、Stryker は
+  # "Final mutation score of NaN is greater than or equal to break threshold 50"
+  # として exit 0 を返す。apps/api/stryker.config.json の
+  # enableFindRelatedTests: false（コミット 14e7f02）により、Task 5 の当初実測
+  # （関連テスト 0 件で ConfigError → exit 2）は解消された。
+  l4-mutation: pass
 expect_detection:
   l2-new-deps: false
