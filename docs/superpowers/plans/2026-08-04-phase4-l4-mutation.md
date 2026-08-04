@@ -654,7 +654,9 @@ git checkout main && git branch -D tmp/red-check-error
 echo "gates.test=$?"
 ```
 
-期待: `gates.test=0`、**30 件成功**（Phase 3 は 27 件。`l4-mutation` の pass / error / 呼び出し位置非依存で +3）。件数が合わなければ理由を確認する。
+期待: `gates.test=0`、**38 件成功**（Phase 3 は 35 件。`l4-mutation` の pass / error / 呼び出し位置非依存で +3）。件数が合わなければ理由を確認する。
+
+（当初この計画は「30 件（Phase 3 は 27 件）」と書いていたが、27 件は **Phase 2** の実測値だった。Phase 3 の受け入れ記録は 35 件である。実装時に `phase0-findings.md` §4 で確認して訂正した。）
 
 - [ ] **Step 7: クリーンなツリーで全ゲートが緑であることを確認する**
 
@@ -1148,8 +1150,8 @@ grep -E '^(--- |全体の所要時間)' /tmp/run-all-task7.log
 
 | 項目 | 記録する内容 |
 |---|---|
-| `./scripts/gates/gates.test.sh` | exit code と成功件数（Phase 3 は 27 件） |
-| `node --test verification/lib/judge.test.mjs` | exit code と成功件数（Phase 3 は 22 件）。**`judge.mjs` を変更していないので件数は変わらない見込みだが、実行して確認する** |
+| `./scripts/gates/gates.test.sh` | exit code と成功件数（Phase 3 は **35 件**） |
+| `node --test verification/lib/judge.test.mjs` | exit code と成功件数（Phase 3 は **26 件**）。**`judge.mjs` を変更していないので件数は変わらない見込みだが、実行して確認する** |
 | `shellcheck scripts/gates/*.sh scripts/stryker-diff.sh verification/*.sh` | exit code と指摘件数 |
 | `pnpm turbo build typecheck test` | exit code とタスク数・テスト件数 |
 | `pnpm exec eslint . --max-warnings=0` | exit code |
