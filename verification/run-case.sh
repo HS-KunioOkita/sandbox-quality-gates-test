@@ -167,11 +167,29 @@ run_detection_gate() {
 # 非ブロックゲートは元ブランチとの差分を見るので、比較対象を渡す。
 export GATE_BASE_REF="$BASE_BRANCH"
 
+# l4-mutation は l3-test が緑であることを前提にする。Stryker は初回テスト実行が
+# 緑でないとミューテーションを始められず、非ゼロで終わる（Task 4 Step 5 で実測）。
+# これを fail と記録すれば「テストが落ちている」が「L4 が空虚なテストを検出した」に
+# なり、error と記録すればケース全体が判定不能（⚠️）になる。どちらも誤りなので、
+# l3-test が pass でないケースでは l4-mutation を実行せず TSV にも書かない。
+# l2-install が失敗したら後続を打ち切るのと同じ理由づけである（設計書 §8.2）。
+#
+# スキップしたことは stderr に必ず出す。黙って飛ばすと「走らなかった緑」と
+# 「走って通った緑」が区別できなくなる（§1.43）。
+l3_test_code=""
 if ! run_gate "${GATE_ORDER[0]}"; then
   printf '%s が pass しなかったため後続のブロックゲートを打ち切りました\n' "${GATE_ORDER[0]}" >&2
 else
   for gate in "${GATE_ORDER[@]:1}"; do
-    run_gate "$gate" || true
+    if [ "$gate" = "l4-mutation" ] && [ "$l3_test_code" != "0" ]; then
+      printf '  %-20s skipped（l3-test が pass しなかったため実行しない）\n' "$gate" >&2
+      continue
+    fi
+    run_gate "$gate"
+    gate_code=$?
+    if [ "$gate" = "l3-test" ]; then
+      l3_test_code="$gate_code"
+    fi
   done
 fi
 
