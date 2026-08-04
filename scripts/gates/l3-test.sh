@@ -35,13 +35,21 @@ if [ "$raw" -eq 0 ]; then
   exit "$GATE_PASS"
 fi
 
-# Jest はテスト失敗もコンテナ起動失敗も 1 を返す。ログに「テストが実際に走って
-# 失敗した」証跡があるときだけ fail に写像し、それ以外は error に倒す。
+# Jest も Vitest もテスト失敗もコンテナ起動失敗も 1 を返す。ログに「テストが実際に
+# 走って失敗した」証跡があるときだけ fail に写像し、それ以外は error に倒す。
 #
-# 判定に使う文字列:
-#   'Tests:.*failed'   Jest のサマリ行（例: `Tests: 1 failed, 3 passed, 4 total`）
-#   'Test suites?:.*failed'  スイート単位の失敗（テストが 1 件も走らずスイートが落ちた場合も含む）
-# のうち前者だけを fail とする。後者だけが出ている場合は、テストファイルの
-# import が解決できない・コンテナが起動しないといった「走れなかった」側の可能性が
-# 高いため error に残す。
-gate_fail_if_matches "$_test_log" 'Tests:.*[0-9]+ failed'
+# 判定に使うのはテスト件数のサマリ行だけである。このゲートはフィルタ無しで
+# `pnpm turbo test` を走らせるので api（Jest）と web（Vitest）の両方が対象に入り、
+# **同じモノレポで 2 つのテストランナーがそれぞれ違う書式のサマリを出す**（実測）:
+#   Jest   `Tests:       1 failed, 27 passed, 28 total`  コロンあり・カンマ区切り
+#   Vitest `      Tests  1 failed | 10 passed (11)`      コロン無し・パイプ区切り
+# さらに turbo 経由の Vitest は `Tests` と件数の間に ANSI の色付けエスケープを
+# 挟む（実測。cat -v 表記で `Tests ^[[22m ^[[1m^[[31m2 failed`）ため、空白文字
+# だけを許すパターンでは一致しない。ここは `.*` で両方の書式を吸収する。
+#
+# スイート単位の見出し（Jest の `Test Suites:` / Vitest の `Test Files`）は判定に
+# 使わない。どちらも文字列 `Tests` を含まないので下のパターンには一致しない。
+# テストが 1 件も走らずスイートだけが落ちた場合は、テストファイルの import が
+# 解決できない・コンテナが起動しないといった「走れなかった」側の可能性が高いため
+# error に残す（§1.36 で実際にこの形の exit 2 を観測している）。
+gate_fail_if_matches "$_test_log" 'Tests.*[0-9]+ failed'
