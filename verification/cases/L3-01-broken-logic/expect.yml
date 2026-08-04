@@ -1,0 +1,17 @@
+id: L3-01-broken-logic
+pitfall: 割引計算のロジックを壊す
+claimed_layer: L3
+# 手順書 §4 は L3（テスト）を回帰の検出に置く。既存の単体テストが
+# 割引後の金額を固定しているので、そこで捕まることを主張している。
+claimed_gate: l3-test
+expect:
+  l2-install: pass
+  l1-typecheck: pass
+  l1-lint: pass
+  l2-semgrep: pass
+  l2-osv: pass
+  l2-gitleaks: pass
+  l3-test: fail
+  l3-openapi-drift: pass
+expect_detection:
+  l2-new-deps: false

@@ -1,0 +1,13 @@
+diff --git a/apps/api/src/orders/dto/order-response.dto.ts b/apps/api/src/orders/dto/order-response.dto.ts
+index d5e4878..2454565 100644
+--- a/apps/api/src/orders/dto/order-response.dto.ts
++++ b/apps/api/src/orders/dto/order-response.dto.ts
+@@ -27,4 +27,8 @@ export class OrderResponseDto {
+   /** 会員割引を適用した合計金額 */
+   @ApiProperty()
+   discountedTotal!: number;
++
++  /** 備考。OpenAPI には出るが、既存コードは何も入れない */
++  @ApiProperty({ required: false })
++  note?: string;
+ }

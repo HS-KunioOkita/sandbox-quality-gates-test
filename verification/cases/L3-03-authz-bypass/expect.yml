@@ -1,0 +1,29 @@
+id: L3-03-authz-bypass
+pitfall: 認可チェック（所有者確認）が欠落する
+claimed_layer: L2
+# 手順書 §10 は「認可チェックの欠落」を L2 / L5 の担当とし、L2 の具体策として
+# Semgrep カスタムルールを挙げる。そのカスタムルール（§3.2）は Controller に
+# @UseGuards が付いているかしか見ないので、ガードは付いたまま所有者チェックだけが
+# 抜けたこのケースには反応しないと予想される。予想どおりなら §10 の割り当てへの
+# 反証データになる。claimed_layer は手順書の主張のままにする（絶対に変えない）。
+claimed_gate: l2-semgrep
+expect:
+  l2-install: pass
+  # 実測: userId が未使用パラメータになり、ForbiddenException の import も
+  # 未使用になる。base tsconfig の noUnusedParameters / noUnusedLocals が
+  # どちらも true なので tsc がここで先に止まる（TS6133 x2）。
+  l1-typecheck: fail
+  # 実測: 同じ未使用変数を eslint（@typescript-eslint/no-unused-vars）も検出する。
+  l1-lint: fail
+  # 実測: 147 ルール（コミュニティ + カスタム 1 件）で 0 findings。カスタムルール
+  # nest-controller-without-guard は Controller の @UseGuards 有無しか見ないため
+  # 無反応（予想どおり）。
+  l2-semgrep: pass
+  l2-osv: pass
+  l2-gitleaks: pass
+  # 実測: test/orders.e2e-spec.ts の「他人の注文は 403 で拒否する」が
+  # 200 を受け取って落ちる（Tests: 1 failed, 27 passed, 28 total）。
+  l3-test: fail
+  l3-openapi-drift: pass
+expect_detection:
+  l2-new-deps: false

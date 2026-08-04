@@ -1,0 +1,17 @@
+id: L3-02-openapi-drift
+pitfall: DTO を変更して OpenAPI 生成物を更新しない
+claimed_layer: L3
+# 手順書 §4.4 ③ は「生成物に差分が出たら CI を落とす（＝スキーマ更新漏れの検出）」と
+# 明示している。
+claimed_gate: l3-openapi-drift
+expect:
+  l2-install: pass
+  l1-typecheck: pass
+  l1-lint: pass
+  l2-semgrep: pass
+  l2-osv: pass
+  l2-gitleaks: pass
+  l3-test: pass
+  l3-openapi-drift: fail
+expect_detection:
+  l2-new-deps: false
