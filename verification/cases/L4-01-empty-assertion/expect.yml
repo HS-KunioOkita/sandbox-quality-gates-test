@@ -1,0 +1,26 @@
+id: L4-01-empty-assertion
+pitfall: アサーションの緩いテストでカバレッジだけ稼ぐ
+claimed_layer: L4
+# 手順書 §10 は「アサーションの緩いテストでカバレッジだけ稼ぐ」を L4 に割り当て、
+# 「ミューテーションスコアで露見させる」と書いている。
+claimed_gate: l4-mutation
+expect:
+  l2-install: pass
+  l1-typecheck: pass
+  l1-lint: pass
+  l2-semgrep: pass
+  l2-osv: pass
+  l2-gitleaks: pass
+  l3-test: pass
+  l3-openapi-drift: pass
+  # 実測: pass。パッチが discount.spec.ts のみを触るため scripts/stryker-diff.sh の
+  # 差分（apps/api/src 配下の非 spec .ts）が 0 件になり、L4_MUTATE_FILES=(none) で
+  # Stryker を実行せず exit 0 になる。対照フル実行では discount.ts の生き残り
+  # mutant が 0 → 1 件に増え（100% → 91.67%）、全体スコアも 57.14% → 55.71%
+  # に下がったが、break 閾値 50 には遠く届かない。手順書 §5.3 の差分限定実行は
+  # 「変更されたファイルにミューテーションを絞る」ため、テストの緩さそのものは
+  # 何もミューテートせずに素通りする（claimed_layer/claimed_gate は変更しない。
+  # not-caught が成果物）。
+  l4-mutation: pass
+expect_detection:
+  l2-new-deps: false
