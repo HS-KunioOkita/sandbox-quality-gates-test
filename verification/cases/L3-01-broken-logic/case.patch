@@ -1,0 +1,11 @@
+diff --git a/apps/api/src/discount/discount.ts b/apps/api/src/discount/discount.ts
+index cac33e0..fa9d6c2 100644
+--- a/apps/api/src/discount/discount.ts
++++ b/apps/api/src/discount/discount.ts
+@@ -13,5 +13,5 @@ export function applyDiscount(price: number, isMember: boolean): number {
+   if (price < MEMBER_DISCOUNT_MIN_PRICE) {
+     return price;
+   }
+-  return Math.floor(price * (1 - MEMBER_DISCOUNT_RATE));
++  return Math.floor(price * (1 - MEMBER_DISCOUNT_RATE * 2));
+ }

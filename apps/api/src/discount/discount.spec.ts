@@ -1,3 +1,4 @@
+import fc from 'fast-check';
 import { MEMBER_DISCOUNT_MIN_PRICE } from '@repo/shared';
 import { applyDiscount } from './discount';
 
@@ -25,5 +26,46 @@ describe('applyDiscount', () => {
 
   it('0 円は割引されない', () => {
     expect(applyDiscount(0, true)).toBe(0);
+  });
+});
+
+// 手順書 §4.5 の指定どおり環境変数で回数を切り替える。
+// 毎 PR は 100（数秒）、nightly は FC_NUM_RUNS=10000 で深く探索する。
+const NUM_RUNS = Number(process.env.FC_NUM_RUNS ?? 100);
+
+describe('applyDiscount のプロパティ', () => {
+  it('割引後の価格は元の価格を超えない', () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 0, max: 1_000_000 }),
+        fc.boolean(),
+        (price, isMember) => applyDiscount(price, isMember) <= price,
+      ),
+      { numRuns: NUM_RUNS },
+    );
+  });
+
+  it('非会員の価格は常に元のまま', () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 0, max: 1_000_000 }),
+        (price) => applyDiscount(price, false) === price,
+      ),
+      { numRuns: NUM_RUNS },
+    );
+  });
+
+  it('割引後の価格は非負の整数', () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 0, max: 1_000_000 }),
+        fc.boolean(),
+        (price, isMember) => {
+          const result = applyDiscount(price, isMember);
+          return Number.isInteger(result) && result >= 0;
+        },
+      ),
+      { numRuns: NUM_RUNS },
+    );
   });
 });

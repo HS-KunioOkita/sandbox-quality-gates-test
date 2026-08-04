@@ -26,6 +26,15 @@ WORK=$(mktemp -d)
 # なり、表が全部 ✅ で埋まる。たとえば main 側に lint エラーが 1 つ混入するだけで、
 # 全ケースが blockedBy: [l1-lint] で match を返す。ケースの判定は、この対照が
 # 取れていることの上でしか意味を持たない。
+
+# ケース別・全体の経過時間を計測する（申し送り #26）。ログにタイムスタンプが
+# 無く「実行者の申告とログの mtime しか根拠が無い」状態を解消するのが目的なので、
+# 外部コマンド（date 等）を呼ばずに済む bash 組み込みの SECONDS を使う。
+# 計測の開始は**対照実行の前**に置く。ここより後ろに置くと、末尾が出す
+# 「全体の所要時間」が 8 ゲート分の対照実行を丸ごと落とした値になる。
+ALL_STARTED=$SECONDS
+baseline_started=$SECONDS
+
 printf '=== baseline（パッチ無し） ===\n' >&2
 for gate in "${GATE_ORDER[@]}"; do
   "./scripts/gates/$gate.sh" >"$WORK/baseline-$gate.log" 2>&1
@@ -39,6 +48,9 @@ for gate in "${GATE_ORDER[@]}"; do
     exit 2
   fi
 done
+# ケースごとの `--- %s: %s 秒 ---` と同じ体裁で対照実行の所要も出す。TSV には
+# 列を足さない（parseActual が 4 列目以降を summary として結合するため。§1.38）。
+printf -- '--- baseline: %s 秒 ---\n' "$((SECONDS - baseline_started))" >&2
 
 {
   printf '# 検証結果マトリクス\n\n'
@@ -65,7 +77,11 @@ done
   # 同上（Markdown のコードスパン表記。展開させない意図）
   # shellcheck disable=SC2016
   printf '  ケースは `claimed_gate` で照合するので「層は一致したが名指しされたツールは無反応」を\n'
-  printf '  区別できる。ただし同じゲート内でどのルールが落としたかは区別しない。\n\n'
+  printf '  区別できる。ただし同じゲート内でどのルールが落としたかは区別しない。\n'
+  # 同上（Markdown のコードスパン表記。展開させない意図）
+  # shellcheck disable=SC2016
+  printf -- '- **「止めた」と「検出した」を区別している。** 非ブロックゲート（`l2-new-deps`）は\n'
+  printf '  exit code で欠陥を主張しないので、検出した場合は「（検出のみ）」と注記する。\n\n'
   printf '| ケース | 落とし穴 | 手順書の主張 | 実際に止めた層 | 判定 |\n'
   printf '|---|---|---|---|---|\n'
 } >"$WORK/head.md"
@@ -75,9 +91,13 @@ for case_dir in verification/cases/*/; do
   case_id=$(basename "$case_dir")
   printf '=== %s ===\n' "$case_id" >&2
   stderr_log="$WORK/$case_id.stderr.log"
+  case_started=$SECONDS
   ./verification/run-case.sh "$case_id" >"$WORK/$case_id.json" 2>"$stderr_log"
   case_status=$?
   cat "$stderr_log" >&2
+  # 先頭が "-" だと bash の printf ビルトインがオプションと誤認する
+  # （実測: `printf: --: invalid option`）ため `--` で区切る。
+  printf -- '--- %s: %s 秒 ---\n' "$case_id" "$((SECONDS - case_started))" >&2
   if [ "$case_status" -ne 0 ]; then
     # node_modules の復元失敗（run-case.sh 末尾、pnpm install --frozen-lockfile が
     # 失敗したときのメッセージ）だけは他の exit 2 と同列に扱ってはいけない。
@@ -108,7 +128,13 @@ for case_dir in verification/cases/*/; do
     else if (r.claimVerdict === "mismatch") mark = "❌ 別の層が止めた";
     else if (r.claimGateVerdict === "mismatch") mark = "❌ 層は一致・主張したツールは無反応";
     else mark = "✅ 一致";
-    const blocked = r.blockedBy.length > 0 ? r.blockedBy.join(", ") : "（なし）";
+    // 「止めた」ゲート（blockedBy）と「検出のみ」のゲート（detectedBy、非ブロック
+    // ゲート。申し送り #25）を 1 列にまとめる。両方ある・片方だけある・どちらも
+    // 無いの 3 通りで空文字列と空配列の判定が絡み合うと壊れやすいので、配列のまま
+    // 連結してから空判定する（brief の三項演算子の組み立てだと読みにくいための変更。
+    // 詳細は task-8-report.md）。
+    const caughtParts = [...r.blockedBy, ...r.detectedBy.map((g) => `${g}（検出のみ）`)];
+    const caught = caughtParts.length > 0 ? caughtParts.join(", ") : "（なし）";
     // 手順書がツール名まで名指ししているケースは、その名前も併記する
     const claim = r.expected.claimedGate
       ? `${r.expected.claimedLayer} (${r.expected.claimedGate})`
@@ -124,10 +150,11 @@ for case_dir in verification/cases/*/; do
     const note = notes.length > 0 ? " ※設定ずれ: " + notes.join(" / ") : "";
     // pitfall や注記に | が入ると Markdown の表が壊れるのでエスケープする
     const esc = (s) => String(s).replace(/\|/g, "\\|");
-    process.stdout.write(`| ${esc(r.expected.id)} | ${esc(r.expected.pitfall)} | ${esc(claim)} | ${esc(blocked)} | ${esc(mark + note)} |\n`);
+    process.stdout.write(`| ${esc(r.expected.id)} | ${esc(r.expected.pitfall)} | ${esc(claim)} | ${esc(caught)} | ${esc(mark + note)} |\n`);
   ' "$WORK/$case_id.json" >>"$WORK/rows.md"
 done
 
 cat "$WORK/head.md" "$WORK/rows.md" >"$RESULTS"
 printf '\n生成しました: %s\n' "$RESULTS" >&2
+printf '全体の所要時間: %s 分 %s 秒\n' "$(((SECONDS - ALL_STARTED) / 60))" "$(((SECONDS - ALL_STARTED) % 60))" >&2
 cat "$RESULTS"

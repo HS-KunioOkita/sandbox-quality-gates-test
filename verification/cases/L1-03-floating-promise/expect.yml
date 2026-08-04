@@ -8,5 +8,9 @@ expect:
   l2-semgrep: pass
   l2-osv: pass
   l2-gitleaks: pass
+  # 実測: fail。await 忘れの追加が orders.service.spec.ts か統合テストを落とす
+  # （claimVerdict 自体は l1-lint で match のため影響なし）。
+  l3-test: fail
+  l3-openapi-drift: pass
 expect_detection:
   l2-new-deps: false

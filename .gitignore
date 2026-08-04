@@ -7,3 +7,5 @@ reports/
 openapi.json
 .superpowers/
 .playwright-mcp/
+apps/web/test-results/
+apps/web/playwright-report/

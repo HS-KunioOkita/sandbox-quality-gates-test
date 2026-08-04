@@ -4,7 +4,11 @@ packages:
 allowBuilds:
   '@prisma/client': true
   '@prisma/engines': true
+  '@scarf/scarf': false # swagger-ui-dist の推移的依存。postinstall は利用状況を Scarf 社へ送信するだけの計測用スクリプトで、ビルドには不要
+  cpu-features: false # ssh2 の native crypto 高速化用。Docker はローカルソケット経由のみで使い、ssh2 の SSH 接続機能は使わないため不要
   prisma: true
+  protobufjs: false # postinstall は devDependencies の versionScheme 警告を出すだけで、ビルドは発生しない
+  ssh2: false # @testcontainers/postgresql の推移的依存（Docker の ssh:// ホスト対応）。ローカル Docker Desktop のみが対象で SSH 経由の接続はしない
   unrs-resolver: true
 
 # 供給網対策。semgrep の p/nodejs が要求する 3 つ（実測で findings として挙がった）。
@@ -14,8 +18,48 @@ blockExoticSubdeps: true      # 推移的依存を信頼できない配布元か
 minimumReleaseAge: 10080      # 公開から 7 日（分）経っていない版は入れない
 trustPolicy: no-downgrade     # 更新でセキュリティ設定が引き下げられるのを防ぐ
 
+# minimumReleaseAge は「新しく追加しようとしている依存」だけでなく、既に固定している
+# 依存も lockfile を書き換える操作（pnpm add 等）のたびに再検証する。そのため、既存の
+# 固定依存が 1 つでも公開から 7 日未満だと、追加しようとしている依存自身が条件を
+# 満たしていても pnpm add そのものが全面的に失敗する（Phase 3 Task 1 で実測、
+# phase0-findings.md §1.21）。ルート package.json が固定する @types/node@26.1.2 と
+# jsdom@30.0.0（いずれも 2026-07-27 公開）が実測時点でこれに該当したため、
+# この 2 つだけを除外する。他の直接依存はすべて 7 日ルールの対象のままである。
+# pnpm 自身のエラーメッセージ（ERR_PNPM_NO_MATURE_MATCHING_VERSION）も
+# minimumReleaseAgeExclude の利用を案内している。
+#
+# brace-expansion もこの例外に加わった。Phase 2 で override 固定した 5.0.8 に対し、
+# Phase 3 の作業中（2026-08-04）に新たな High 脆弱性 GHSA-rgw5-rvv9-x895（CVSS 7.5）が
+# 公開された。依存を完全固定していても、時間の経過だけでゲートが赤くなる実例である。
+# 修正版 5.0.9 は公開 4.6 日前で、minimumReleaseAge（7 日）を満たさずそのままでは
+# インストールできない。OSV-Scanner が「上げろ」と言い、minimumReleaseAge が
+# 「上げさせない」という板挟みになるため、@types/node / jsdom と同じ形で個別に除外する
+# （詳細は phase0-findings.md §1.39）。
+minimumReleaseAgeExclude:
+  - '@types/node'
+  - jsdom
+  - brace-expansion
+
 # brace-expansion 1.1.16 / 2.1.2 は GHSA-mh99-v99m-4gvg（High）。いずれも推移的依存で
 # 直接指定していない。修正版 5.0.8 は既に lockfile 内に別経路で入っていたので、
-# override で 1 本に集約する。
+# override で 1 本に集約した。
+#
+# その 5.0.8 に対し、Phase 3 の作業中（2026-08-04）に新たな High 脆弱性
+# GHSA-rgw5-rvv9-x895（CVSS 7.5、修正版 5.0.9）が公開されたため、5.0.9 へ更新する。
+# 5.0.9 は上の minimumReleaseAgeExclude に加えたことでインストール可能になった。
 overrides:
-  brace-expansion: 5.0.8
+  brace-expansion: 5.0.9
+
+  # Task 6（OpenAPI 型生成）で @nestjs/swagger@11.4.6 / openapi-typescript@7.13.0 を追加した
+  # ところ、両者が推移的に持ち込む js-yaml に High 脆弱性が 2 件見つかった
+  # （GHSA-52cp-r559-cp3m: js-yaml@4.2.0、GHSA-pm4m-ph32-ghv5: js-yaml@5.2.1）。
+  # js-yaml はこのリポジトリに 3 系統ある（3.15.0 は jest 経由で対象外、4.2.0 は
+  # openapi-typescript → @redocly/openapi-core 経由、5.2.1 は @nestjs/swagger 経由）。
+  # メジャーバージョンが異なり API 互換性が無いため単一バージョンには集約できない。
+  # pnpm の overrides はキーに `@<range>` を付けると、その range を要求している依存元
+  # だけを対象にできる（例: `js-yaml@4` は js-yaml の 4.x を要求する依存元にのみ適用され、
+  # 3.x / 5.x を要求する依存元には影響しない）ため、系統ごとに個別の修正版を当てる。
+  # 修正版の公開日は 4.3.0 が 37.6 日前、5.2.2 が 10.6 日前で、いずれも
+  # minimumReleaseAge（7 日）を満たす。
+  js-yaml@4: 4.3.0
+  js-yaml@5: 5.2.2

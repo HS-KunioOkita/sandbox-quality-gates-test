@@ -142,7 +142,22 @@ export function judge(expected, actual) {
 
   const blockingLayers = [...new Set(blockedBy.map(layerOfGate))];
 
+  // 非ブロックゲートで「検出した」ものを別に集める。ブロックと検出は別の概念なので
+  // blockedBy には混ぜない。手順書 §3.3 の新規依存検出はブロックを意図しておらず、
+  // exit code は常に 0 である。これを blockedBy で測ろうとすると、設計どおり動いて
+  // いるケースが原理的に match になりえない（§1.26 / 申し送り #25）。
+  const detectedBy = entries
+    .filter(isDetectionGate)
+    .filter(([, r]) => r.detected === 'true')
+    .map(([gate]) => gate);
+
+  const detectingLayers = [...new Set(detectedBy.map(layerOfGate))];
+
   if (errored.length > 0) {
+    // 捨てるのは推論であって観測ではない。判定（claimVerdict 等）は放棄するが
+    // （設計書 §6.1）、blockedBy / detectedBy は実測値なのでそのまま返す。
+    // detectedBy を空配列に潰すと、run-all.sh:129 が組み立てる「実際に止めた層」列で
+    // ⚠️ 行のブロックしたゲートだけが残り、非ブロックゲートの検出が消える。
     return {
       claimVerdict: 'inconclusive',
       claimGateVerdict: 'inconclusive',
@@ -150,6 +165,8 @@ export function judge(expected, actual) {
       errored,
       blockedBy,
       blockingLayers,
+      detectedBy,
+      detectingLayers,
       mismatches: [],
       detectionMismatches: [],
     };
@@ -182,10 +199,19 @@ export function judge(expected, actual) {
     }
   }
 
+  // 手順書が非ブロックゲートを名指ししているケースは「検出したか」で判定する。
+  // それ以外は従来どおり「止めたか」で判定する。`actual` に該当ゲートが無い
+  // 場合（未実行のゲートを名指ししている等）は isDetectionGate が false を返す
+  // ので、静かに従来の（止めたか、の）経路に落ちる。
+  const claimIsDetection =
+    expected.claimedGate !== '' && isDetectionGate([expected.claimedGate, actual[expected.claimedGate] ?? {}]);
+  const caughtBy = claimIsDetection ? detectedBy : blockedBy;
+  const caughtLayers = claimIsDetection ? detectingLayers : blockingLayers;
+
   let claimVerdict;
-  if (blockedBy.length === 0) {
+  if (caughtBy.length === 0) {
     claimVerdict = 'not-caught';
-  } else if (blockingLayers.includes(expected.claimedLayer)) {
+  } else if (caughtLayers.includes(expected.claimedLayer)) {
     claimVerdict = 'match';
   } else {
     claimVerdict = 'mismatch';
@@ -196,7 +222,7 @@ export function judge(expected, actual) {
   let claimGateVerdict;
   if (expected.claimedGate === '') {
     claimGateVerdict = 'n/a';
-  } else if (blockedBy.includes(expected.claimedGate)) {
+  } else if (caughtBy.includes(expected.claimedGate)) {
     claimGateVerdict = 'match';
   } else {
     claimGateVerdict = 'mismatch';
@@ -210,6 +236,8 @@ export function judge(expected, actual) {
     errored,
     blockedBy,
     blockingLayers,
+    detectedBy,
+    detectingLayers,
     mismatches,
     detectionMismatches,
   };

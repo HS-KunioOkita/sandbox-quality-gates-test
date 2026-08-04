@@ -10,5 +10,9 @@ expect:
   l2-semgrep: fail
   l2-osv: pass
   l2-gitleaks: pass
+  # 実測: fail。ガードを外すと e2e の 401 を期待するテストが落ちる
+  # （claimVerdict 自体は l2-semgrep で match のため影響なし）。
+  l3-test: fail
+  l3-openapi-drift: pass
 expect_detection:
   l2-new-deps: false

@@ -7,6 +7,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "jest",
     "generate": "prisma generate",
+    "generate:openapi": "ts-node -P tsconfig.build.json src/openapi.ts",
     "start:dev": "ts-node -P tsconfig.build.json src/main.ts",
     "db:migrate": "prisma migrate dev",
     "db:seed": "ts-node -P tsconfig.build.json prisma/seed.ts"
@@ -23,13 +24,17 @@
     "rxjs": "7.8.2"
   },
   "devDependencies": {
+    "@nestjs/swagger": "11.4.6",
     "@nestjs/testing": "11.1.28",
     "@repo/eslint-config": "workspace:*",
     "@repo/tsconfig": "workspace:*",
+    "@testcontainers/postgresql": "12.0.4",
     "@types/express": "5.0.6",
     "@types/jest": "30.0.0",
+    "@types/supertest": "7.2.1",
     "jest": "30.4.2",
     "prisma": "6.19.3",
+    "supertest": "7.2.2",
     "ts-jest": "29.4.12",
     "ts-node": "10.9.2"
   }

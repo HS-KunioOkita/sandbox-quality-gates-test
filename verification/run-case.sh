@@ -128,12 +128,17 @@ fi
 #
 # TSV は 4 列: <ゲート名> <exit code> <detected> <summary>
 # summary は tr -d '\t' でタブを除いているが、列の追加時に破綻しないよう
-# 防御的に最後に置く。
+# 防御的に最後に置く。経過秒数は TSV に列を足さず stderr に出す
+# （judge.mjs の parseActual は 4 列目以降を summary として結合するため、
+# 列を挿入すると判定が静かに壊れる。申し送り #26）。
 run_gate() {
   local gate="$1"
   local log="$LOGS/$gate.log"
+  local started
+  started=$SECONDS
   "./scripts/gates/$gate.sh" >"$log" 2>&1
   local code=$?
+  printf '  %-20s exit=%s %ss\n' "$gate" "$code" "$((SECONDS - started))" >&2
   local summary
   summary=$(tail -n 1 "$log" | tr -d '\t' | cut -c1-120)
   printf '%s\t%s\t-\t%s\n' "$gate" "$code" "$summary" >>"$ACTUAL"
@@ -145,12 +150,15 @@ run_gate() {
 run_detection_gate() {
   local gate="$1"
   local log="$LOGS/$gate.log"
+  local started
+  started=$SECONDS
   "./scripts/gates/$gate.sh" >"$log" 2>&1
   local code=$?
   local detected=false
   if grep -q 'NEW_DEPENDENCY_DETECTED' "$log"; then
     detected=true
   fi
+  printf '  %-20s exit=%s %ss\n' "$gate" "$code" "$((SECONDS - started))" >&2
   local summary
   summary=$(tail -n 1 "$log" | tr -d '\t' | cut -c1-120)
   printf '%s\t%s\t%s\t%s\n' "$gate" "$code" "$detected" "$summary" >>"$ACTUAL"
