@@ -1218,7 +1218,7 @@ ConfigError: No tests were executed. Stryker will exit prematurely. Please check
 | ケース | `claimed_layer` | 触ったファイル | mutant | スコア |
 |---|---|---|---|---|
 | `L1-01-eslint-disable-abuse` | L1 | `orders/orders.service.ts` | 40 | **40.00 %**（16 killed / 24 no coverage） |
-| `L2-03-hardcoded-secret` | L2 | `orders/orders.service.ts` | 40 前後（`run-all.sh` 実行時のログは未保存） | 40 % 台 |
+| `L2-03-hardcoded-secret` | L2 | `orders/orders.service.ts` | **未保存**（`run-all.sh` の一時ログは次のケースで消える） | 40 % 台 |
 | `L2-04-new-dependency` | L2 | `orders/orders.service.ts` | 同上 | 40 % 台 |
 
 **3 件とも同じファイルを触っており、そのファイルのフル実行スコアが 40 %（閾値 50 未満）だから落ちている。** 追加された変更（`eslint-disable`、ハードコードした秘密、`dayjs` の依存追加）自体はロジックを壊していない。**`l4-mutation` はこれらの欠陥を検出したのではなく、「たまたま薄いファイルが差分に入った」ことに反応している。**
