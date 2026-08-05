@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# 手順書 §5.3 の差分限定ミューテーション実行。
+#
+# 手順書の原文からの変更点は 4 つ。1・2・4 は「手順書どおりでは何も測れない／
+# 区別できない」ことを実測してから入れた修正である。3（GATE_BASE_REF への移行）は
+# 実測した失敗の再現ではなく、検証ハーネスの既存規約（l2-new-deps.sh）に合わせた
+# 予防的な変更である（fetch 自体は実測時に成功しており、ネットワーク障害そのものは
+# 再現していない）（詳細は docs/superpowers/phase0-findings.md §1.45 以降）。
+#
+#   1. --mutate に渡すパスをパッケージ相対に直す（仮説 4）。git diff はリポジトリ
+#      ルート相対（apps/api/src/...）を返すが、pnpm --filter api exec は apps/api を
+#      カレントにするので、そのまま渡すと apps/api/apps/api/src/... を探して空振りする。
+#   2. pathspec を 'apps/api/src' にする。'apps/api/src/**/*.ts' は git の pathspec
+#      では src 直下のファイルに一致しない（§1.23 と同型）。
+#   3. git fetch を廃し、比較対象を GATE_BASE_REF で受け取る。検証ハーネスは main から
+#      切ったローカルの検証ブランチ上で走るので origin への fetch は不要で、
+#      ネットワーク障害をゲートの失敗に化けさせるだけである（l2-new-deps.sh と同じ方針）。
+#   4. ミューテート対象のファイル名を必ず標準出力に出す。差分 0 件でスキップした緑と
+#      「実際にミューテートして生き残らなかった」緑を、ログから区別できるようにする
+#      （§1.43 の「何が走ったか分からない緑」を作らないため）。
+set -euo pipefail
+
+BASE_REF="${GATE_BASE_REF:-origin/${BASE_BRANCH:-main}}"
+if ! git rev-parse --verify --quiet "$BASE_REF" >/dev/null; then
+  printf 'stryker-diff: 比較対象の ref が見つかりません: %s\n' "$BASE_REF" >&2
+  exit 3
+fi
+
+# --diff-filter=d で削除されたパスを除く。削除だけの差分（ファイルを消した PR）では
+# git diff が消えたパスを返し、Stryker は "did not result in any files" の警告だけを
+# 出して 0 mutant / exit 0 で完走する。L4_MUTATE_FILES にはファイル名が出てしまうので、
+# §1.45 の対策（何をミューテートしたかを出力する）でも「実際にミューテートして通った
+# 緑」と区別できない唯一の経路だった（最終レビューの指摘。§1.45 参照）。
+CHANGED=$(git diff --name-only --diff-filter=d "$BASE_REF...HEAD" -- 'apps/api/src' \
+  | grep -E '\.ts$' | grep -v '\.spec\.ts$' || true)
+
+if [ -z "$CHANGED" ]; then
+  printf 'L4_MUTATE_FILES=(none)\n'
+  echo "変更なし。スキップします。"
+  exit 0
+fi
+
+MUTATE=$(printf '%s\n' "$CHANGED" | sed 's|^apps/api/||' | paste -sd, -)
+printf 'L4_MUTATE_FILES=%s\n' "$MUTATE"
+pnpm --filter api exec stryker run --mutate "$MUTATE"

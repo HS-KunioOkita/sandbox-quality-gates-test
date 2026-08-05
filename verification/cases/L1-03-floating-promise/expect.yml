@@ -12,5 +12,7 @@ expect:
   # （claimVerdict 自体は l1-lint で match のため影響なし）。
   l3-test: fail
   l3-openapi-drift: pass
+  # l4-mutation はここに書かない。l3-test が fail するケースでは Stryker の初回テスト
+  # 実行が緑にならず、ハーネスがゲートをスキップする（run-case.sh の依存スキップ）。
 expect_detection:
   l2-new-deps: false

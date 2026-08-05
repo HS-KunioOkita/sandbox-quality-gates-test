@@ -10,8 +10,27 @@ expect:
   l1-lint: pass
   l2-semgrep: pass
   l2-osv: pass
+  # Phase 3 からの値（pass）に戻した。Task 5 で一時的に fail と書いていたが、これは
+  # L2-04 自身の性質ではなく、l4-mutation が Phase 4 で持ち込んだケース間汚染の
+  # 副作用だった: apps/api/reports/mutation/mutation.json（mutation.html も同様）は
+  # gitignore 済みで run-case.sh の cleanup でも消えず、ミューテートしたソース
+  # ファイルの全文を埋め込む。run-all.sh はケースをアルファベット順に実行するため
+  # 必ず直前に L2-03-hardcoded-secret が走り、その l4-mutation が
+  # orders.service.ts（L2-03 が追加した秘密文字列を含む）をミューテートしてレポートに
+  # 埋め込んだまま残り、同じファイルを touch する L2-04 の l2-gitleaks
+  # （ゲート順で l4-mutation より前）がそれを検出していた（node_modules の持ち越し、
+  # 申し送り #17 と同型）。run-case.sh の cleanup で apps/api/reports/mutation を
+  # 削除するよう修正し（コミット 74fcab1）、この汚染経路を断った。修正後は
+  # L2-03 → L2-04 の順で実行しても L2-04 単体で実行しても l2-gitleaks は pass で
+  # 一致することを実測で確認済み。
   l2-gitleaks: pass
   l3-test: pass
   l3-openapi-drift: pass
+  # 予測: fail。case.patch は orders.service.ts に dayjs を使う定数とフィールドを
+  # 追加するだけだが、差分限定 Stryker はファイル単位でミューテートするため対象は
+  # 同ファイル全体になる。同ファイルのフル実行スコアは 40.00%（閾値 50 を下回る）ため、
+  # 追加分がテストで覆われていなくても閾値割れという結果自体は変わらない見込み
+  # （run-all.sh で実測確認）。
+  l4-mutation: fail
 expect_detection:
   l2-new-deps: true

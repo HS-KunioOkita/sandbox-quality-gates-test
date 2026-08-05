@@ -10,5 +10,9 @@ expect:
   l2-gitleaks: pass
   l3-test: pass
   l3-openapi-drift: pass
+  # 予測: pass。case.patch は apps/web/src/api/client.ts のみを触り、
+  # apps/api/src 配下に差分が無いため stryker-diff.sh は L4_MUTATE_FILES=(none) で
+  # スキップする（run-all.sh で実測確認）。
+  l4-mutation: pass
 expect_detection:
   l2-new-deps: false

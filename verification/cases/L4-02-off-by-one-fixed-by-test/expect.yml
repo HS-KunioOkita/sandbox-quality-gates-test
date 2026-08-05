@@ -1,0 +1,31 @@
+id: L4-02-off-by-one-fixed-by-test
+pitfall: 誤った実装をテストで固定化する
+claimed_layer: L4
+# 手順書 §10 は「誤った実装をテストで固定化する」を L4 / L5 に割り当て、
+# 「ミューテーションテスト＋別観点からのレビュー」を対策として挙げている。
+# L5 は Phase 5 の対象なので、本ケースは L4 の側だけを測る。
+claimed_gate: l4-mutation
+expect:
+  l2-install: pass
+  l1-typecheck: pass
+  l1-lint: pass
+  l2-semgrep: pass
+  l2-osv: pass
+  l2-gitleaks: pass
+  l3-test: pass
+  l3-openapi-drift: pass
+  # 実測: pass。discount.ts を触るため scripts/stryker-diff.sh の差分限定実行が
+  # 実際に走り（L4_MUTATE_FILES=src/discount/discount.ts）、discount.ts 単体の
+  # スコアは 100%（12/12 killed、生き残り 0）。対照フル実行でも discount.ts は
+  # 100%（baseline と同一）、全体スコアも 57.14%（baseline と同一）で全く変化なし。
+  # off-by-one に関係する境界の mutant（`<` ⇔ `<=`）も含めて生き残っていない。
+  # これは L4 が off-by-one を「検出した」からではなく、discount.spec.ts の
+  # 該当テストを誤った挙動（閾値ちょうどで割引されない）に合わせて書き換えた
+  # ため、正しい挙動へ戻す mutant まで道連れで殺しているからである。
+  # つまりテストが実装に追従している限り、ミューテーションスコアは実装の
+  # 正誤と無関係に高いままになる＝L4 は「誤った実装をテストで固定化する」
+  # パターンを一貫して検出しない（claimed_layer/claimed_gate は変更しない。
+  # not-caught が成果物）。
+  l4-mutation: pass
+expect_detection:
+  l2-new-deps: false

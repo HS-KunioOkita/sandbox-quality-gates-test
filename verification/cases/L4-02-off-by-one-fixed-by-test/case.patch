@@ -1,0 +1,26 @@
+diff --git a/apps/api/src/discount/discount.spec.ts b/apps/api/src/discount/discount.spec.ts
+index c743f7e..f24946c 100644
+--- a/apps/api/src/discount/discount.spec.ts
++++ b/apps/api/src/discount/discount.spec.ts
+@@ -8,7 +8,7 @@ describe('applyDiscount', () => {
+   });
+ 
+   it('会員で閾値ちょうどのときは割引される', () => {
+-    expect(applyDiscount(MEMBER_DISCOUNT_MIN_PRICE, true)).toBe(900);
++    expect(applyDiscount(MEMBER_DISCOUNT_MIN_PRICE, true)).toBe(1000);
+   });
+ 
+   it('会員で閾値のすぐ下のときは割引されない', () => {
+diff --git a/apps/api/src/discount/discount.ts b/apps/api/src/discount/discount.ts
+index cac33e0..b0cc40d 100644
+--- a/apps/api/src/discount/discount.ts
++++ b/apps/api/src/discount/discount.ts
+@@ -10,7 +10,7 @@ export function applyDiscount(price: number, isMember: boolean): number {
+   if (!isMember) {
+     return price;
+   }
+-  if (price < MEMBER_DISCOUNT_MIN_PRICE) {
++  if (price <= MEMBER_DISCOUNT_MIN_PRICE) {
+     return price;
+   }
+   return Math.floor(price * (1 - MEMBER_DISCOUNT_RATE));

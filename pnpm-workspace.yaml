@@ -18,6 +18,26 @@ blockExoticSubdeps: true      # 推移的依存を信頼できない配布元か
 minimumReleaseAge: 10080      # 公開から 7 日（分）経っていない版は入れない
 trustPolicy: no-downgrade     # 更新でセキュリティ設定が引き下げられるのを防ぐ
 
+# 公開から 30 日（分）以上経った版の trust downgrade は無視する。
+#
+# Phase 4 の着手時に `pnpm --filter api add` が ERR_PNPM_TRUST_DOWNGRADE で失敗した。
+# 原因は semver@6.3.1 で、2023 年公開・provenance attestation 無し・6.x の上位版が
+# 存在しない。babel（@babel/core / @babel/plugin-proposal-decorators）が ^6.3.1 を
+# 要求する限り再発するため、**Stryker に限らず依存を 1 つも追加できない**状態だった。
+# 2 回目の実行では Stryker と無関係な apps/web の eslint-plugin-react-hooks 経由で
+# 同じエラーが出ており、既存の依存グラフ全体に及ぶブロックであることを実測している。
+#
+# pnpm install --frozen-lockfile（l2-install ゲート）は lockfile を再解決しないので
+# trust チェックが走らず、影響を受けない（実測: この設定を入れる前も exit 0 だった）。
+# 壊れていたのは新規解決だけである。
+#
+# 個別除外（trustPolicyExclude）ではなくこちらを選んだのは、「除外リストが依存追加の
+# たびに増えれば保護が空文化する」という minimumReleaseAgeExclude への批判が
+# trustPolicy にもそのまま当てはまるため。takeover のリスクが実際に高い「公開直後の
+# 版」に対する保護はこの設定でも残る。人間の判断で導入した（詳細は
+# docs/superpowers/phase0-findings.md §1.58）。
+trustPolicyIgnoreAfter: 43200
+
 # minimumReleaseAge は「新しく追加しようとしている依存」だけでなく、既に固定している
 # 依存も lockfile を書き換える操作（pnpm add 等）のたびに再検証する。そのため、既存の
 # 固定依存が 1 つでも公開から 7 日未満だと、追加しようとしている依存自身が条件を
@@ -35,10 +55,19 @@ trustPolicy: no-downgrade     # 更新でセキュリティ設定が引き下げ
 # インストールできない。OSV-Scanner が「上げろ」と言い、minimumReleaseAge が
 # 「上げさせない」という板挟みになるため、@types/node / jsdom と同じ形で個別に除外する
 # （詳細は phase0-findings.md §1.39）。
+# fast-uri が 4 例目である。Phase 4 で Stryker を追加したところ、その推移的依存
+# （ajv ← @stryker-mutator/core）の fast-uri@3.1.4 に High 脆弱性
+# GHSA-7p8r-x3mc-p8w7（CVSS 7.5）があり l2-osv が赤くなった。ajv は
+# fast-uri: ^3.0.1 を要求するので 3 系で修正されている 3.1.5 しか選べないが、
+# 3.1.5 は公開 3.96 日で minimumReleaseAge（7 日）を満たさない。brace-expansion の
+# 4.6 日と同じ板挟みである（§1.39）。**除外は 4 件に増えた。**「除外運用を無制限に
+# 続ければ 7 日待つという保護そのものが空文化する」という §1.39 の指摘が、
+# 予測ではなく実測として積み上がっていることを記録しておく。
 minimumReleaseAgeExclude:
   - '@types/node'
   - jsdom
   - brace-expansion
+  - fast-uri
 
 # brace-expansion 1.1.16 / 2.1.2 は GHSA-mh99-v99m-4gvg（High）。いずれも推移的依存で
 # 直接指定していない。修正版 5.0.8 は既に lockfile 内に別経路で入っていたので、
@@ -63,3 +92,22 @@ overrides:
   # minimumReleaseAge（7 日）を満たす。
   js-yaml@4: 4.3.0
   js-yaml@5: 5.2.2
+
+  # Phase 4 で @stryker-mutator/core@9.6.1 を追加したところ、その推移的依存に
+  # 脆弱性が 2 件見つかった（l2-osv が実測で exit 1）。
+  #
+  #   fast-uri@3.1.4  High   CVSS 7.5  GHSA-7p8r-x3mc-p8w7  経路: ajv ← core
+  #   qs@6.15.1       Medium CVSS 6.3  GHSA-q8mj-m7cp-5q26  経路: typed-rest-client ← core
+  #
+  # fast-uri は修正版の最小版（3.1.5）に固定する（brace-expansion / js-yaml と同じ方針）。
+  # 公開 3.96 日なので上の minimumReleaseAgeExclude にも追加した。
+  #
+  # qs は 6.15.3（公開 2026-06-24、41 日前）に寄せる。修正最小版は 6.15.2 だが、
+  # 6.15.2 に固定すると express / superagent 経由で既に解決していた健全な 6.15.3 を
+  # 下げてしまう（レビューで指摘。実測: lockfile 上で 6.15.3 → 6.15.2 に変わっていた）。
+  # 6.15.3 も GHSA-q8mj-m7cp-5q26 の修正を含み、7 日ルールも満たす。
+  #
+  # 「L3 の依存追加が L2 のゲートを赤くした」（§1.34 の js-yaml）と同じことが
+  # L4 でも起きた。**新しい層を足したら既存の全ゲートを回すまで終わりではない。**
+  fast-uri: 3.1.5
+  qs: 6.15.3
