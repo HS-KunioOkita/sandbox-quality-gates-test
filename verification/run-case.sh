@@ -235,15 +235,21 @@ fi
 # node_modules の持ち越し（直下のコメント、申し送り #17）とまったく同じ型の
 # ケース間汚染である。
 #
-# apps/web 側は GATE_ORDER に mutation ゲートが無く、run-case.sh からは Stryker が
-# 走らないため対象に含めない（apps/web/reports/mutation/ は本ハーネスの実行では
-# 更新されないことを実測で確認済み）。
+# apps/web 側は GATE_ORDER に mutation ゲートが無いのでこのハーネスの実行では更新され
+# ないが、**手で回した Stryker の残骸が同じ経路を持つ**。最終レビュー時点で
+# apps/web/reports/mutation/mutation.html（Task 2 のフル実行の産物、web のソース全文
+# 入り、309 KB）が作業ツリーに実在し、l2-gitleaks は --no-git で作業ツリー全体を
+# 走査するため毎回これを読んでいた。web のソースに秘密が無いので今は緑だが、経路は
+# 塞がっていない。予防として web 側も削除対象に含める。
 #
-# 削除は固定の相対パス 1 つのみを扱う。変数展開に頼ると、展開結果が空になったときに
+# 削除は固定の相対パスのみを扱う。変数展開に頼ると、展開結果が空になったときに
 # 意図しない場所を消す事故になりうる（例: "$x/reports" で $x が空だと /reports を
 # 狙う）ため、リテラルパスを直接検査してから消す。
 if [ -d apps/api/reports/mutation ]; then
   rm -rf -- apps/api/reports/mutation
+fi
+if [ -d apps/web/reports/mutation ]; then
+  rm -rf -- apps/web/reports/mutation
 fi
 
 # node_modules を元ブランチの状態に戻す。

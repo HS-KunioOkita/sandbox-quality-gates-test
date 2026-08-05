@@ -26,7 +26,12 @@ if ! git rev-parse --verify --quiet "$BASE_REF" >/dev/null; then
   exit 3
 fi
 
-CHANGED=$(git diff --name-only "$BASE_REF...HEAD" -- 'apps/api/src' \
+# --diff-filter=d で削除されたパスを除く。削除だけの差分（ファイルを消した PR）では
+# git diff が消えたパスを返し、Stryker は "did not result in any files" の警告だけを
+# 出して 0 mutant / exit 0 で完走する。L4_MUTATE_FILES にはファイル名が出てしまうので、
+# §1.45 の対策（何をミューテートしたかを出力する）でも「実際にミューテートして通った
+# 緑」と区別できない唯一の経路だった（最終レビューの指摘。§1.45 参照）。
+CHANGED=$(git diff --name-only --diff-filter=d "$BASE_REF...HEAD" -- 'apps/api/src' \
   | grep -E '\.ts$' | grep -v '\.spec\.ts$' || true)
 
 if [ -z "$CHANGED" ]; then

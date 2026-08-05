@@ -16,6 +16,15 @@
  * は @stryker-mutator/core 自身のインストール先から相対的にディレクトリを
  * 列挙する実装で、pnpm の隔離 node_modules では jest-runner を発見できず
  * 起動時に "Cannot find TestRunner plugin \"jest\"" で落ちる（task-1-report.md 参照）。
+ *
+ * 同じ `stryker.config.json` の `jest.enableFindRelatedTests: false` も同種の逸脱で、
+ * api 側で最も影響が大きい。既定の true は dry run に `--findRelatedTests <対象>` を
+ * 渡すため、関連する spec が 1 つも無いファイルを差分限定でミューテートすると Jest が
+ * "No tests were found" を返し、Stryker が ConfigError で落ちて **fail(1) ではなく
+ * error(2)** になる（検証ケース L3-02 が実際に ⚠️ 判定不能へ転落した）。false にすると
+ * dry run が unit 全体を回すので pass / fail が算出できるようになる代わりに、mutant
+ * ごとに unit スイート全体を回すコストが乗り、対象ファイルによって所要が 2 桁変わる。
+ * 人間の判断で false を採用した（詳細は docs/superpowers/phase0-findings.md §1.52）。
  */
 import type { Config } from 'jest';
 import { unitProject } from './jest.config';
