@@ -1453,7 +1453,23 @@ if (defaultValue === undefined ||
 
 **このフェーズ自身のログが証拠になっている。** §1.45 の逐語実行で `--mutate apps/api/src/discount/discount.ts`（解決できないパス）を渡したとき `Instrumented 0 source file(s) with 0 mutant(s)` になった。config の `mutate`（`src/**/*.ts`）が併用されていれば 0 にはならず、全ソースがミューテートされていたはずである。
 
-**帰結**：`src/main.ts` に 1 行触った PR は、`--mutate src/main.ts` として実行され、除外されないままミューテートされる。`main.ts` に対応する spec は無いので `enableFindRelatedTests: false` の下では全 mutant が Survived になり（§1.52 の `orders.controller.ts` と同じ形）、**スコア 0 % 付近で `l4-mutation` が fail(1) を返す。** 手順書 §5.2 が「不当に下がる」と言って除外したまさにそのファイルが、§5.3 の実行経路では判定に使われる。
+**帰結を実測した。** 一時ブランチで `src/main.ts` に**実際に起こりうる変更**（CORS の `origin` を `'http://localhost:5173'` から `['http://localhost:5173', 'http://localhost:4173']` に変え、vite preview のポートも許可する）を 1 つ入れてコミットし、ゲートを回した。
+
+```
+$ GATE_BASE_REF=feat/phase4-l4-mutation ./scripts/gates/l4-mutation.sh
+L4_MUTATE_FILES=src/main.ts
+INFO Instrumenter Instrumented 1 source file(s) with 14 mutant(s)
+INFO DryRunExecutor Initial test run succeeded. Ran 20 tests in 1 second (net 15 ms, overhead 1158 ms).
+All files |   0.00 |    0.00 |        0 |         0 |         14 |        0 |        0 |
+ main.ts  |   0.00 |    0.00 |        0 |         0 |         14 |        0 |        0 |
+ERROR MutationTestReportHelper Final mutation score 0.00 under breaking threshold 50, setting exit code to 1 (failure).
+$ echo $?
+1
+```
+
+**`stryker.config.json` の `!src/main.ts` は効かず、`main.ts` は 14 mutant を生成してミューテートされた。** 14 件すべて Survived（`main.ts` を叩く spec が無く、`enableFindRelatedTests: false` の下では unit スイート全体が走るので No coverage ではなく Survived に分類される。§1.52 の `orders.controller.ts` と同じ形）。**スコア 0.00 %、`l4-mutation` は fail(1)。** 手順書 §5.2 が「不当に下がる」と言って除外したまさにそのファイルが、§5.3 の実行経路では判定に使われている。
+
+**ミューテートされた行は `main.ts` のほぼ全域に及ぶ**（`src/main.ts:8:43` の `bootstrap` のブロック、`11:18` / `12:13` / `12:14` / `12:39` の CORS 設定、`13:21` / `13:22` / `13:38` の `ValidationPipe` のオプション、`16:24` 以降の `listen`、`22:39` / `24:17` のエラーハンドラ）。**変更した 1 行だけではなくファイル全体が対象になる**ので、`main.ts` に触る PR は変更の大きさに関わらず 0 % になる。
 
 **これは §1.53（薄いファイルに触ると落ちる）より強い形である。** §1.53 は「手順書が意図していない副作用」だが、こちらは**手順書が明示的に除外すると書いたものが、同じ手順書の別の節で復活する**——2 つの節が打ち消し合っている。
 
