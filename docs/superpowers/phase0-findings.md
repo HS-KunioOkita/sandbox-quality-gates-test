@@ -282,6 +282,10 @@ Phase 3 でも同じ型を 3 回観測した。**Phase 1 / Phase 2 の件数と�
 
 実装者が挙げたもう一つの寄与要因も記録する。**§1.25 は根拠（同一コミットの `RESULTS.md`）を引用していなかった。** 出典を明示していれば、文を書いた本人が「この主張は `RESULTS.md` のどの行に対応するか」を機械的に照合でき、自己検出しやすかった可能性がある。
 
+**3 回目（Phase 4。この findings 自身の中で再発した）**：§1.49 と §3 の申し送り #28 に「`l4-mutation` は `GATE_ORDER` の 9 本の中で**唯一** Docker を必要としないゲートになった」と書いた。**事実に反する。** `gate_require_docker` を呼ぶのは `l2-semgrep` / `l2-osv` / `l2-gitleaks` / `l3-test` の 4 本だけで、**Docker を必要としないゲートは 9 本中 5 本ある**（`l2-install` / `l1-typecheck` / `l1-lint` / `l3-openapi-drift` / `l4-mutation`）。しかも**同じコミットで追記した `CLAUDE.md` の Docker 注記は「Docker 必須は 4 本」という表を前提にしており、自己矛盾していた。** 書き手が確認したのは「`l4-mutation` が `gate_require_docker` を呼ばないこと」（1 ゲート分）だけで、**「唯一」という全称量化子の方は他の 8 本を数えずに書いた。** レビューが捕まえた。
+
+**この 3 回目を §1.13 本体の表には数えていない。** §1.13 が数えているのは「ゲートが緑を返しているのに何も検査していない」型で、これはドキュメント内の全称主張の誤りだからである（回数を盛らないため、型が違うものを同じ列に足さない）。ただし**この節に記録する価値はある。3 回とも「1 つの主張を確認したことで、同じ文の別の主張も確認した気になった」という同一の構造であり、3 回ともレビューが捕まえた。** 具体的な予防策も 3 回目で 1 つ増えた: **「唯一」「すべて」「必ず」を書くときは、その量化子が及ぶ範囲を機械的に列挙してから書く**（今回なら `grep -lE '^[[:space:]]*gate_require_docker' scripts/gates/*.sh` を 1 回打てば足りた）。
+
 ### 1.14 §2.4 が使う `tseslint.config()` は deprecated
 
 typescript-eslint 8.65.0 で `tseslint.config()` は非推奨になっており、ESLint コアの `defineConfig()`（`eslint/config`）が推奨されている。動作はするため Phase 1 では手順書に忠実な形を維持したが、手順書のコード例は非推奨 API に依存している。
@@ -1132,7 +1136,9 @@ $ pnpm --filter api exec jest -c jest.stryker.config.ts --listTests
 .../apps/api/src/auth/auth.guard.spec.ts
 ```
 
-`test/orders.int-spec.ts` / `test/orders.e2e-spec.ts`（Testcontainers 経由で `postgres:16-alpine` を起動する 2 本）は列挙されない。**この結果、`l4-mutation` は `GATE_ORDER` の 9 本の中で唯一 Docker を必要としないゲートになっている**（`gate_require_docker` を呼ばないのは意図的で、`scripts/gates/l4-mutation.sh` の冒頭コメントに理由を書いた）。
+`test/orders.int-spec.ts` / `test/orders.e2e-spec.ts`（Testcontainers 経由で `postgres:16-alpine` を起動する 2 本）は列挙されない。**この結果、`l4-mutation` は Jest を回すゲートでありながら Docker を必要としない**（`gate_require_docker` を呼ばないのは意図的で、`scripts/gates/l4-mutation.sh` の冒頭コメントに理由を書いた）。
+
+`gate_require_docker` の呼び出しを各ゲートスクリプトで実測すると、**`GATE_ORDER` の 9 本のうち Docker を必要とするのは 4 本**（`l2-semgrep` / `l2-osv` / `l2-gitleaks` / `l3-test`）で、**`l4-mutation` は残りの 5 本の側**（`l2-install` / `l1-typecheck` / `l1-lint` / `l3-openapi-drift` / `l4-mutation`）に入る。**意味があるのは本数ではなく `l3-test` との対比である**——`l3-test` と `l4-mutation` は**同じ Jest の同じテストコードを対象にするのに、前提条件が違う**（`l3-test` は Testcontainers を含むので Docker が要る、`l4-mutation` は unit だけに絞ったので要らない）。同じテスト資産を使う 2 つの層で必要な環境が違うことは、CI のステップを組むときに効く。
 
 **申し送り #28 が心配した「破滅的に遅くなる」は実測していない。** 遅くなる構成（`projects` をそのまま渡す）を実際に走らせて時間を測るのではなく、`--listTests` で「unit だけが列挙される」ことを確認して先に手当てを入れた。**「対策しなかった場合にどれだけ遅いか」は未実測である。**
 
@@ -1217,11 +1223,11 @@ ConfigError: No tests were executed. Stryker will exit prematurely. Please check
 
 | ケース | `claimed_layer` | 触ったファイル | mutant | スコア |
 |---|---|---|---|---|
-| `L1-01-eslint-disable-abuse` | L1 | `orders/orders.service.ts` | 40 | **40.00 %**（16 killed / 24 no coverage） |
-| `L2-03-hardcoded-secret` | L2 | `orders/orders.service.ts` | **未保存**（`run-all.sh` の一時ログは次のケースで消える） | 40 % 台 |
-| `L2-04-new-dependency` | L2 | `orders/orders.service.ts` | 同上 | 40 % 台 |
+| `L1-01-eslint-disable-abuse` | L1 | `orders/orders.service.ts` | 40（**実測**） | **40.00 %**（**実測**。16 killed / 24 no coverage） |
+| `L2-03-hardcoded-secret` | L2 | `orders/orders.service.ts` | **未保存**（`run-all.sh` の一時ログは次のケースで消える） | **未保存。閾値 50 を割ったこと（exit=1）だけが実測で、値は不明** |
+| `L2-04-new-dependency` | L2 | `orders/orders.service.ts` | 同上 | 同上 |
 
-**3 件とも同じファイルを触っており、そのファイルのフル実行スコアが 40 %（閾値 50 未満）だから落ちている。** 追加された変更（`eslint-disable`、ハードコードした秘密、`dayjs` の依存追加）自体はロジックを壊していない。**`l4-mutation` はこれらの欠陥を検出したのではなく、「たまたま薄いファイルが差分に入った」ことに反応している。**
+**3 件とも同じファイル（`orders.service.ts`。フル実行のスコアは 40 %）を触っており、そのファイルが閾値 50 を下回るために落ちている。** ただし**`L2-03` / `L2-04` のスコアの値そのものは実測できていない。** パッチは同じファイルに文字列リテラルや import を足すので、mutant 数もスコアも `L1-01` の 40.00 % とは変わりうる。**実測しているのは「3 件とも exit=1 だった」ことと、「`L1-01` は 40.00 % だった」ことだけである。** 追加された変更（`eslint-disable`、ハードコードした秘密、`dayjs` の依存追加）自体はロジックを壊していない。**`l4-mutation` はこれらの欠陥を検出したのではなく、「たまたま薄いファイルが差分に入った」ことに反応している。**
 
 これは §1.42（`l3-test` は L1 系・L2 系の欠陥でも fail する）と同じ型だが、**原因が違う。** `l3-test` の fail は欠陥が引き起こす挙動の変化を拾っていた（副作用としては本物の検出）。`l4-mutation` の fail は**欠陥とは無関係**で、変更行が 1 行でも入れば同じファイルの既存の未テスト部分が判定に持ち込まれる。判定（`claimVerdict` / `claimGateVerdict`）はいずれも `match` のままなので `RESULTS.md` の ✅ は変わらないが、**`expect` の pass/fail が層の独立性を示さないという §1.42 の結論は、L4 でより強い形になる。**
 
@@ -1362,16 +1368,28 @@ This error happened while installing the dependencies of eslint-plugin-react-hoo
 
 人間の判断で `trustPolicyIgnoreAfter: 43200`（30 日）を入れて解消した（コミット `8d8fada`）。**個別除外（`trustPolicyExclude`）ではなくこちらを選んだのは、「除外リストが依存追加のたびに増えれば保護が空文化する」という §1.39 の `minimumReleaseAgeExclude` への批判が `trustPolicy` にもそのまま当てはまるためである。** takeover のリスクが実際に高い「公開直後の版」への保護はこの設定でも残る。
 
-**依存追加は続けて `l2-osv` も赤くした。** Stryker の依存ツリーから 2 件の脆弱性が入った。
+**手順書への提案**：§3.3 は「架空パッケージ・供給網対策」を掲げながら pnpm 側の設定（`minimumReleaseAge` / `trustPolicy` / `blockExoticSubdeps`）に触れていない。これはその**3 例目**である（§1.21 の `minimumReleaseAge` の運用コスト、§1.39 の OSV との構造的デッドロック、そして本項の `trustPolicy` による全面ブロック）。**設定を推奨するなら、それが「依存を追加できない」形で開発を止めうることと、その例外運用（誰が・どの基準で緩めるか、緩めた設定をいつ見直すか）を必ず併記する必要がある。**
+
+### 1.59 Stryker の依存追加が `l2-osv` を赤くし、`minimumReleaseAgeExclude` が 4 件目になった（§1.34 と同型、§1.39 の続き）
+
+§1.58 の `trustPolicy` を緩めて `pnpm add` が通った直後、**同じ依存追加が `l2-osv` を赤くした。** Stryker の依存ツリーから 2 件の脆弱性が入った。
 
 | パッケージ | 重大度 | ID | 経路 |
 |---|---|---|---|
 | `fast-uri@3.1.4` | High（CVSS 7.5） | GHSA-7p8r-x3mc-p8w7 | `ajv@8.18.0` ← `@stryker-mutator/core@9.6.1` |
 | `qs@6.15.1` | Medium（CVSS 6.3） | GHSA-q8mj-m7cp-5q26 | `typed-rest-client@2.3.1` ← `@stryker-mutator/core@9.6.1` |
 
-`overrides` で `fast-uri: 3.1.5` / `qs: 6.15.3` に寄せて解消したが、`fast-uri@3.1.5` は当時公開から約 4 日で `minimumReleaseAge: 10080`（7 日）を満たさず、**`minimumReleaseAgeExclude` への追加が必要になった（`@types/node` / `jsdom` / `brace-expansion` に続く 4 件目）。** §1.39 が「除外運用を無制限に続ければ 7 日ルールが空文化する」と書いた懸念に、Phase 4 でさらに 1 件積み上がった。
+```
+Total 2 packages affected by 2 known vulnerabilities (0 Critical, 1 High, 1 Medium, 0 Low, 0 Unknown) from 1 ecosystem.
+```
 
-**手順書への提案**：§3.3 は「架空パッケージ・供給網対策」を掲げながら pnpm 側の設定（`minimumReleaseAge` / `trustPolicy` / `blockExoticSubdeps`）に触れていない。これはその**3 例目**である（§1.21 の `minimumReleaseAge` の運用コスト、§1.39 の OSV との構造的デッドロック、そして本項の `trustPolicy` による全面ブロック）。**設定を推奨するなら、それが「依存を追加できない」形で開発を止めうることと、その例外運用（誰が・どの基準で緩めるか、緩めた設定をいつ見直すか）を必ず併記する必要がある。**
+**これは §1.34（L3 の依存追加が js-yaml の High を持ち込んで `l2-osv` を赤くした）とまったく同型で、Phase 4 で 2 例目になった。** どちらも devDependency の推移的依存であり、本番ビルドには入らない。`l2-osv.sh` は重大度による足切りをしないので、1 件でも見つかれば exit 1 になる。
+
+`overrides` で `fast-uri: 3.1.5` / `qs: 6.15.3` に寄せて解消したが、**`fast-uri@3.1.5` は当時公開から約 4 日で `minimumReleaseAge: 10080`（7 日）を満たさず、`minimumReleaseAgeExclude` への追加が必要になった（`@types/node` / `jsdom` / `brace-expansion` に続く 4 件目）。** §1.39 が指摘した構造（脆弱性の公開から修正版のリリースまでの期間が `minimumReleaseAge` より短ければ衝突は必ず起きる）がそのまま再現し、**除外リストが 1 件伸びた。**
+
+`qs` の override は最初 `6.15.2` を選んだが、これは express 経由の既存依存（`6.15.3`）を**引き下げる**副作用を持っていた。レビューの指摘で `6.15.3` に直し、`pnpm why qs --filter api` で全経路が単一バージョンに集約されることを確認した。**「脆弱性を直す override」が「健全な依存を下げる」形になりうるという、override 運用のもう 1 つのコストである。**
+
+**手順書への提案**：§3.3 に、OSV-Scanner を重大度で足切りせずゲートにするなら、**devDependency 由来の脆弱性が新しいツールを 1 つ入れるたびに発生すること**と、その対処（`overrides`）が (a) `minimumReleaseAge` と衝突して除外リストを伸ばす、(b) 既存の健全な依存を引き下げうる、という 2 つの副作用を持つことを併記する。§1.39 の提案（例外運用のルールを書く）と同じ結論だが、**Phase 4 は「除外リストは実際に伸び続ける」ことの 4 件目の実測データを追加した。**
 
 ---
 
@@ -1508,11 +1526,11 @@ Phase 2 の各タスクで `minor (deferred)` として記録したものを最�
 | 13 | `turbo` の `dependsOn` は turbo 経由でのみ効く（`stryker-diff.sh` は `generate` を経由しない） | **解消（別の手段で）。** ゲートスクリプトを turbo 経由にはしなかった。`GATE_ORDER` の先頭が `l2-install` で、そこが `pnpm --filter api exec prisma generate` を明示的に実行するため、`l4-mutation`（9 番目）が走る時点で生成物は必ず存在する。手で個別に叩くときだけ `pnpm turbo run generate` が必要になる（`run` の省略が turbo の組み込みコマンドと衝突することも実測した。§1.47 (2)） |
 | 14 | `toOrderResponse` は `mutate` から除外しない | **遵守した。** `apps/api/stryker.config.json` の `mutate` の除外は `*.spec.ts` / `main.ts` / `openapi.ts` / `*.module.ts` の 4 つで、`orders.service.ts`（`toOrderResponse` を含む）は対象に入っている |
 | 15 | `apps/web` の Vitest は `afterEach(cleanup)` を明示登録済み | **前提として維持。加えて反転した事実が見えた。** `cleanup` の呼び出しを消す mutant（`src/test/setup.ts`）が **Survived** した。cleanup が無いと mutant を殺せなくなる、と #15 は言っていたが、**その cleanup 自体を固定しているアサーションは無い**（§1.48 (3)） |
-| 27 | ルール ID 照合（#20 → #27 から継続） | **未解決。穴はさらに広がった。** `l4-mutation` の fail は「どの mutant が生き残ったか」を判定に一切伝えない。実測では 3 ケース（`L1-01` / `L2-03` / `L2-04`）が**同じファイル・同じスコア帯（40 % 台）**で fail しており、判定からは完全に区別できない（§1.53）。Phase 5 へ持ち越す |
-| 28 | Stryker は `l3-test` と同じテストを mutant ごとに回す（Testcontainers が起動する） | **解消。** `unit` プロジェクトを named export に切り出し、Stryker 専用の `apps/api/jest.stryker.config.ts` を作った。`--listTests` で unit の 3 本だけが列挙されることを実測。**結果として `l4-mutation` は `GATE_ORDER` の 9 本で唯一 Docker を必要としないゲートになった**（§1.49）。ただし「対策しなかった場合にどれだけ遅いか」は未実測 |
+| 27 | ルール ID 照合（#20 → #27 から継続） | **未解決。穴はさらに広がった。** `l4-mutation` の fail は「どの mutant が生き残ったか」を判定に一切伝えない。実測では 3 ケース（`L1-01` / `L2-03` / `L2-04`）が**同じファイル（`orders.service.ts`）を触って fail** しており、判定からは完全に区別できない（`L2-03` / `L2-04` のスコアの値は未保存。§1.53）。Phase 5 へ持ち越す |
+| 28 | Stryker は `l3-test` と同じテストを mutant ごとに回す（Testcontainers が起動する） | **解消。** `unit` プロジェクトを named export に切り出し、Stryker 専用の `apps/api/jest.stryker.config.ts` を作った。`--listTests` で unit の 3 本だけが列挙されることを実測。**結果として `l4-mutation` は Docker を必要とせず、`l3-test`（Testcontainers のため Docker が要る）と同じテスト資産を使いながら前提条件が違うゲートになった**（§1.49。`GATE_ORDER` の 9 本のうち Docker が要るのは `l2-semgrep` / `l2-osv` / `l2-gitleaks` / `l3-test` の 4 本で、`l4-mutation` は要らない側の 5 本に入る）。ただし「対策しなかった場合にどれだけ遅いか」は未実測 |
 | 29 | `mutate` からの除外候補が Phase 3 で増えた（`main.ts` / `openapi.ts`） | **解消。** api 側は `!src/main.ts` / `!src/openapi.ts` / `!src/**/*.module.ts` を除外した。web 側は手順書 §5.2 の除外パターンを逐語で使ったため `src/test/setup.ts` の漏れが残っている（実測して記録し、修正はしていない。§1.48 (3)） |
 | 30 | `GATE_ORDER` に L4 を足すときは `gates.list.sh` の 1 箇所だけを直す。`l3-e2e-web` を一緒に拾わない | **遵守した。** `GATE_ORDER` は `scripts/gates/gates.list.sh` の 1 行のみを変更して 9 本になった。`l3-e2e-web` は `GATE_ORDER` の外に残っている |
-| 31 | 依存を 1 つ足すと別の層のゲートが赤くなる（`l2-osv` / `minimumReleaseAge` を想定して着手する） | **想定どおり起きた。加えて想定外の拒否も起きた。** `l2-osv` は `fast-uri`（High）/ `qs`（Medium）で赤くなり、`overrides` + `minimumReleaseAgeExclude`（4 件目）で解消した。**想定していなかったのは `trustPolicy: no-downgrade` による全面ブロックで、これは `pnpm add` そのものを不可能にしていた**（§1.58）。#31 が指示していた「人間に判断を仰ぐ」運用は 3 回発動し、3 回とも守られた |
+| 31 | 依存を 1 つ足すと別の層のゲートが赤くなる（`l2-osv` / `minimumReleaseAge` を想定して着手する） | **想定どおり起きた。加えて想定外の拒否も起きた。** `l2-osv` は `fast-uri`（High）/ `qs`（Medium）で赤くなり、`overrides` + `minimumReleaseAgeExclude`（4 件目）で解消した（§1.59）。**想定していなかったのは `trustPolicy: no-downgrade` による全面ブロックで、これは `pnpm add` そのものを不可能にしていた**（§1.58）。#31 が指示していた「人間に判断を仰ぐ」運用は 3 回発動し、3 回とも守られた |
 | 32 | L4 のゲートも turbo 経由にする。`--filter='...[origin/main]'` は使わない | **一部遵守。** `--filter='...[origin/main]'` は使っていない（比較対象を `GATE_BASE_REF` で明示的に受け取る形にした）。turbo 経由については #13 のとおり、手順書 §7 の形（`./scripts/stryker-diff.sh` を直に呼ぶ）に合わせた |
 
 以下は Phase 4 着手前の原文（記録として残す）。
@@ -1540,15 +1558,15 @@ Phase 2 の各タスクで `minor (deferred)` として記録したものを最�
 
 | # | 内容 |
 |---|---|
-| 27 | **ルール ID 照合は依然として未解決で、L4 が加わって穴が広がった**（#20 → #27 から継続）。`l4-mutation` の fail は「どの mutant が生き残ったか」を `actual.tsv` に一切伝えない。実測では `L1-01` / `L2-03` / `L2-04` の 3 ケースが**同じ `orders.service.ts`・同じ 40 % 台のスコア**で fail しており、判定からは区別できない（§1.53）。Stryker は `reports/mutation/mutation.json` に mutant 単位の status を持っているので、ルール ID 相当の情報は既に手元にある。列を足すなら `judge.mjs` の `parseActual`（4 列目以降を `summary` に結合する）の変更を伴う（§1.38） |
+| 27 | **ルール ID 照合は依然として未解決で、L4 が加わって穴が広がった**（#20 → #27 から継続）。`l4-mutation` の fail は「どの mutant が生き残ったか」を `actual.tsv` に一切伝えない。実測では `L1-01` / `L2-03` / `L2-04` の 3 ケースが**同じ `orders.service.ts` を触って fail** しており、判定からは区別できない（スコアの値は `L1-01` の 40.00 % だけが実測で、他 2 件は未保存。§1.53）。Stryker は `reports/mutation/mutation.json` に mutant 単位の status を持っているので、ルール ID 相当の情報は既に手元にある。列を足すなら `judge.mjs` の `parseActual`（4 列目以降を `summary` に結合する）の変更を伴う（§1.38） |
 | 33 | **`enableFindRelatedTests: false` と `incremental: false` の組み合わせのコストが、ケースによって 2 桁違う。** 差分限定実行が mutant ごとに unit スイート全体を回すため、`orders.controller.ts`（mutant 9 件・関連 spec 無し）で `Done in 4 minutes and 16 seconds` を実測した一方、coverage が付いているファイル（`orders.service.ts`、mutant 61 件）は `Done in 2 seconds` で終わる。16 ケースの通し実行（`run-all.sh`）全体では 8 分 7 秒（対照実行込み）で収まっている。**壁時計の絶対値は根拠にしない（§1.38）が、「同じゲートの所要が対象ファイルによって 2 桁違う」という構造は Phase 5 でケースを増やすときの前提になる。** `incremental: true` の検討はこの構造を踏まえて行うこと（§1.52） |
 | 34 | **web 側に同型の罠がある可能性がある（未実測）。** 手順書 §5.2 の web 設定は `vitest: { related: true }` を明示的に書いている。これが jest-runner の `enableFindRelatedTests` と同じ「関連テストのみ実行」機構であれば、web でもテスト 0 件のファイルを差分限定でミューテートすると error 化する可能性がある。**web は `GATE_ORDER` に入っていないため実測していない。断定しないこと**（§1.52） |
 | 35 | **`src/test/setup.ts` が web の `mutate` 除外パターン漏れで mutate 対象に入っている。** 手順書 §5.2 の除外パターン（`!src/**/*.test.{ts,tsx}` / `!src/main.tsx`）は `src/test/setup.ts` に一致せず、mutant 1 件が生成されて Survived した。**手順書逐語の実測データとして意図的に残してある**（`apps/web/stryker.config.json` は変更していない）。web を nightly に載せるときに、除外を足すか Survived をそのまま報告するかを決めること（§1.48 (3)） |
 | 36 | **`json` / `html` レポーターはミューテート対象のソース全文を埋め込む。** ハーネス側のケース間汚染は `run-case.sh` の cleanup で断ったが（§1.55）、**`cloudbuild.nightly.yaml` でミューテーションレポートを成果物として公開する運用を書くなら、それはソースコード全体を公開範囲に広げる。** 秘密が含まれていれば二次的に拡散する。保存期間・公開範囲・アクセス制御を決めてから書くこと |
 | 37 | **`cloudbuild.pr.yaml` に L4 のステップを書くときの注意が 2 つある。** (a) 手順書 §7 の `l4-mutation` ステップは `corepack enable && ./scripts/stryker-diff.sh` を実行するが、**このリポジトリに `corepack` は入っていない**（CLAUDE.md の環境節）。(b) `scripts/stryker-diff.sh` から `git fetch --no-tags --depth=50` を外したので、**CI では `GATE_BASE_REF` を明示的に渡す必要がある**（渡さないと既定の `origin/main` を見に行き、shallow clone では解決できず `exit 3` → error(2) になる）。`l2-new-deps.sh` と同じ規約なので、両方のステップで同じ変数を渡す形になる |
 | 38 | **nightly のフル実行（手順書 §5.4）を `cloudbuild.nightly.yaml` に載せる形を決めること。** Phase 4 では対照として手で `pnpm --filter api exec stryker run` を回した。**`incremental` を切ったので、「incremental の誤差をリセットするために nightly でフル実行する」という §5.4 の動機自体がこのリポジトリでは成立しない。** それでも nightly のフル実行には別の価値がある（差分限定では原理的に見えない `L4-01` 型の低下が見える。§1.56）。**その価値は「閾値で止める」ことではなく「baseline からの低下を見る」ことなので、載せるなら比較対象のスコアをどこに保存するかを決める必要がある** |
-| 26 | **`run-all.sh` の所要時間の高速化は Phase 4 でも扱わないと決めた**（計画の決定 4）。Phase 4 の実測は **8 分 7 秒**（16 ケース + 対照実行 33 秒。ゲートは 9 本）。Phase 3 の 3 回の実測（6 分 9 秒 / 6 分 1 秒＝ケース分のみ、14 分 35 秒＝対照実行込み）と比べて、**ゲートが 1 本・ケースが 2 本増えても対照実行込みの数字は下がっている。** これは高速化が進んだ証拠ではなく、**壁時計がマシン負荷に支配されることの追加データである**（§1.38）。Phase 5 でケースが 19 本前後になったときに要否を判断すること。判断に使うのは壁時計ではなくゲート別の内訳の構造・専有マシンでの計測・CPU 時間のいずれかにする |
-| 2.2 | **`L5-02-n-plus-one` の前提（§2.2）を Phase 5 の着手時に決めること。** 「L3 も一緒に赤になるならそのケースは L5 の価値を証明していない」という基準は、L4 の 2 ケースで実測の裏付けが得られた。`L4-02` は L3 が緑のまま L4 も緑で、**「どの層も止めない」ことがそのまま反証データになった**（§1.57）。`L4-01` も同様である。**つまり「主張された層だけが赤くなる」形に作れたケースのほうが主張を検証できる**ので、`L5-02` はクエリ形の固定を外すか、別の題材に作り直すのが妥当である |
+| 26 | **`run-all.sh` の所要時間の高速化は Phase 4 でも扱わないと決めた**（計画の決定 4）。Phase 4 の実測は **8 分 7 秒**（16 ケース + 対照実行 33 秒。ゲートは 9 本）。Phase 3 の 3 回の実測（6 分 9 秒 / 6 分 1 秒＝ケース分のみ、14 分 35 秒＝対照実行込み）と比べて、**ゲートが 1 本・ケースが 2 本増えても対照実行込みの数字は下がっている。** **この差の原因は特定していない。** Phase 4 の実行中の load average や Docker のメモリ使用量は測っておらず、§1.38 が負荷を実測したのは Phase 3 の 3 回目だけである。したがって言えるのは「高速化が進んだ証拠ではない」ことと、**§1.38 の「壁時計は再現しない」という結論と整合する追加データである**ことまでである。Phase 5 でケースが 19 本前後になったときに要否を判断すること。判断に使うのは壁時計ではなくゲート別の内訳の構造・専有マシンでの計測・CPU 時間のいずれかにする |
+| 39 | **`L5-02-n-plus-one` の前提を Phase 5 の着手時に決めること**（詳細は §2.2）**。** 「L3 も一緒に赤になるならそのケースは L5 の価値を証明していない」という基準は、L4 の 2 ケースで実測の裏付けが得られた。`L4-02` は L3 が緑のまま L4 も緑で、**「どの層も止めない」ことがそのまま反証データになった**（§1.57）。`L4-01` も同様である。**つまり「主張された層だけが赤くなる」形に作れたケースのほうが主張を検証できる**ので、`L5-02` はクエリ形の固定を外すか、別の題材に作り直すのが妥当である |
 
 ---
 
@@ -1710,7 +1728,7 @@ Phase 2 の各タスクで `minor (deferred)` として記録したものを最�
 | 既存 14 ケースの退行 | **なし。** ✅ 10 / ❌ 4 / ⚠️ 0 で Phase 3 と完全に同一。`l4-mutation` が新たに fail した 3 ケース（`L1-01` / `L2-03` / `L2-04`）はいずれも `claimed_layer` が L1 / L2 で判定は ✅ のまま（§1.53）。`L2-04` の `l2-gitleaks` 設定ずれ（§1.55）は**この通し実行で消えていることを確認した** |
 | `l4-mutation` の 3 値写像 | 赤確認①（閾値割れ → **fail(1)**、`orders.service.ts` 26.23 %、同時に `l3-test=0`）と赤確認②（初回テスト実行の失敗 → **error(2)**、同時に `l3-test=1`）の両方を実測。判別パターン `'Final mutation score .* under breaking threshold'` が閾値割れのログにしか一致しないことを 3 種類のログで確認（§1.51 / §1.54） |
 | 仮説 4（`stryker-diff.sh` のパスのずれ） | **支持された。** 結論は §1.45（「0 mutant の空振りが exit 0 で完走し、第三の緑を作る」）。pathspec の取りこぼしは §1.46 |
-| 供給網設定との衝突 | `trustPolicy: no-downgrade` が依存追加を全面ブロックし（ゲートは全部緑のまま）、`l2-osv` が Stryker の依存で 2 件赤くなった。いずれも人間の判断で `pnpm-workspace.yaml` を変更して解消（§1.58） |
+| 供給網設定との衝突 | `trustPolicy: no-downgrade` が依存追加を全面ブロックし（ゲートは全部緑のまま。§1.58）、`l2-osv` が Stryker の依存で 2 件赤くなった（§1.59）。いずれも人間の判断で `pnpm-workspace.yaml` を変更して解消 |
 
 **Phase 4 で確定した検証ケース 2 本**（`verification/cases/`）
 
@@ -1739,5 +1757,5 @@ Phase 2 の各タスクで `minor (deferred)` として記録したものを最�
 | 1 | 実装計画が閾値の導出例を「68.4 % → 65」（差 3.4 pt）と書いており、手順書本文の例（「45 % なら 40 %」＝差 5 pt）と整合しなかった | 実装者が**手順書側の規則**（`floor((実測 - 5) / 5) * 5`）を採り、報告に理由を明記した（§1.50） |
 | 2 | 実装計画が `gates.test.sh` の期待件数を「Phase 3 は 27 件、+3 で 30 件」と書いていた。**27 件は Phase 2 終了時点の数値**で、Phase 3 終了時点は 35 件 | 実装者が §4 の実測記録を確認して 38 件が正しいことを示し、計画側の記述ミスと判定した |
 | 3 | 実装計画のブリーフが `git checkout main` と書いており（「現在のブランチに読み替える」旨の指示付き）、実装者がリテラルの `main` にコミットしてしまった | 気づいた時点で `cherry-pick` + `git branch -f main origin/main` で復旧し、`git diff main origin/main --stat` で差分ゼロを確認。**`main` で取った 1 回目の実測は採用せず、`feat/phase4-l4-mutation` 上で取り直した** |
-| 4 | 依存追加が 3 回連続で拒否／赤くなり（`ERR_PNPM_TRUST_DOWNGRADE`、`l2-osv` の 2 件）、Task 1 が 2 回 BLOCKED で戻った | **3 回とも実装者は回避策を試さず停止し、人間の判断を仰いだ。** Phase 2 の運用ルール（拒否された操作をコントローラが自セッションで実行して引き渡してはいけない）は守られている（§1.58） |
+| 4 | 依存追加が 3 回連続で拒否／赤くなり（`ERR_PNPM_TRUST_DOWNGRADE`、`l2-osv` の 2 件）、Task 1 が 2 回 BLOCKED で戻った | **3 回とも実装者は回避策を試さず停止し、人間の判断を仰いだ。** Phase 2 の運用ルール（拒否された操作をコントローラが自セッションで実行して引き渡してはいけない）は守られている（§1.58 / §1.59） |
 | 5 | `L2-04` の設定ずれを `expect.yml` の書き換えで吸収するコミットが一度入った（`10993bb`） | コントローラの指摘で取り消し、**原因（ハーネスのケース間汚染）を断つ側**に切り替えた（`74fcab1` / `08e26a8`）。`expect` は「ケース単体の振る舞い」のスナップショットであるべき、という規律の適用例（§1.55） |
