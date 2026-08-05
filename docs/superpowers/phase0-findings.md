@@ -286,6 +286,10 @@ Phase 3 でも同じ型を 3 回観測した。**Phase 1 / Phase 2 の件数と�
 
 **この 3 回目を §1.13 本体の表には数えていない。** §1.13 が数えているのは「ゲートが緑を返しているのに何も検査していない」型で、これはドキュメント内の全称主張の誤りだからである（回数を盛らないため、型が違うものを同じ列に足さない）。ただし**この節に記録する価値はある。3 回とも「1 つの主張を確認したことで、同じ文の別の主張も確認した気になった」という同一の構造であり、3 回ともレビューが捕まえた。** 具体的な予防策も 3 回目で 1 つ増えた: **「唯一」「すべて」「必ず」を書くときは、その量化子が及ぶ範囲を機械的に列挙してから書く**（今回なら `grep -lE '^[[:space:]]*gate_require_docker' scripts/gates/*.sh` を 1 回打てば足りた）。
 
+**4 回目（同じコミット。派生した件数を更新し忘れた）**：`CLAUDE.md` の「現在地」で ❌ を 4 行 → 6 行に更新したのに、その 6 行下にある**同じ数字から派生した注意書き**（「❌ の 4 行と『`claimVerdict` が `mismatch`』の 3 件は一致しない」）を Phase 3 のまま残し、**同一文書内で自己矛盾させた。** `phase0-findings.md` §4 の同じ注意書きは正しく 6 行に更新していたので、**2 つの文書のうち片方だけを直した**形でもある。これは 2 回目（申し送りテーブルの 1 行だけを「解消」に更新した件）と同型で、**訂正の作業そのものが「この数字はもう直した」という感覚を作り、派生記述への確認を打ち切らせる。** 予防策: **数字を更新したら、その数字を根拠にしている記述を `grep` で全部洗う**（今回なら `grep -n '❌ の' CLAUDE.md docs/superpowers/phase0-findings.md`）。
+
+**3 回目・4 回目も §1.13 本体の表には数えていない**（型が違う。本体はゲートの空振りを数える列である）。**どちらもレビューが捕まえており、4 例すべてでセルフレビューは捕まえていない。** この節の主張（セルフレビューはこの型を確実には捕まえない）は 4 例目でさらに強まった。
+
 ### 1.14 §2.4 が使う `tseslint.config()` は deprecated
 
 typescript-eslint 8.65.0 で `tseslint.config()` は非推奨になっており、ESLint コアの `defineConfig()`（`eslint/config`）が推奨されている。動作はするため Phase 1 では手順書に忠実な形を維持したが、手順書のコード例は非推奨 API に依存している。
@@ -1034,6 +1038,21 @@ exit code は **`0`**（`bash -c 'set +e; ./scripts/stryker-diff.sh > log 2>&1; 
 
 修正後は同じ変更に対して 17 mutant が生成され、Survived 2 件（`ConditionalExpression` / `EqualityOperator`）が出た（`discount.ts` 単体 82.35 %）。**0 mutant → 17 mutant という変化そのものが、修正前が空振りだったことの直接証拠である。**
 
+**追記（最終レビュー）：削除・リネームの差分は別扱いが必要で、この節の対策が効かない唯一の経路だった。** `git diff --name-only` は**削除されたパスも返す**ので、`apps/api/src` のファイルを消しただけの PR では存在しないパスが `--mutate` に渡り、同じ「0 mutant / exit 0」に戻る。しかも `L4_MUTATE_FILES` にはファイル名が出力されるため、**この節が導入した「何をミューテートしたかを出す」対策では区別できない**（「変更なしでスキップ」でもなく、ログ上は正常にミューテートしたように見える）。`git diff --name-only --diff-filter=d` に変えて削除を除いた。実測（一時ブランチで `apps/api/src/prisma/prisma.service.ts` を削除してコミット）:
+
+```
+$ git diff --name-only "feat/phase4-l4-mutation...HEAD" -- 'apps/api/src' | grep -E '\.ts$' | grep -v '\.spec\.ts$'
+apps/api/src/prisma/prisma.service.ts          ← --diff-filter=d が無いと削除済みパスが出る
+$ git diff --name-only --diff-filter=d "feat/phase4-l4-mutation...HEAD" -- 'apps/api/src' | grep -E '\.ts$' | grep -v '\.spec\.ts$'
+（空）
+$ GATE_BASE_REF=feat/phase4-l4-mutation ./scripts/stryker-diff.sh
+L4_MUTATE_FILES=(none)
+変更なし。スキップします。
+exit=0
+```
+
+**「緑の種類を区別する」という対策は、区別すべき種類を数え漏らすと 1 つの経路で崩れる。** ログに情報を出すこと自体は正しかったが、出した情報（ファイル名）が「そのファイルが存在する」ことを含意しない点を見落としていた。
+
 ### 1.46 手順書 §5.3 の pathspec `'apps/api/src/**/*.ts'` は `src` 直下のファイルに一致しない（§1.23 と同型）
 
 同じ一時ブランチで `apps/api/src/app.module.ts`（`src` 直下）にもコメントを足し、2 つの pathspec を比較した（生出力）。
@@ -1053,7 +1072,9 @@ apps/api/src/discount/discount.ts
 
 git の pathspec の `**` はシェル glob と違って「0 階層以上」を暗黙に含まない。**§1.23（§3.3 の `'**/package.json'` がルート直下の `package.json` に一致しない）とまったく同じ誤りが、手順書の別の節で再発している。**
 
-実害はこのリポジトリでは小さい（`app.module.ts` は `stryker.config.json` の `mutate` からも除外している）。ただし**取りこぼすのは「ディレクトリを作らずに `src` 直下に置いたファイル」全部**であり、リポジトリの構成次第で差分限定実行が黙って対象を落とす。`scripts/stryker-diff.sh` では pathspec を `'apps/api/src'` に直し、拡張子の絞り込みは `grep -E '\.ts$'` で行う形にした。
+**取りこぼすのは「ディレクトリを作らずに `src` 直下に置いたファイル」全部**であり、リポジトリの構成次第で差分限定実行が黙って対象を落とす。`scripts/stryker-diff.sh` では pathspec を `'apps/api/src'` に直し、拡張子の絞り込みは `grep -E '\.ts$'` で行う形にした。
+
+**当初この節には「実害はこのリポジトリでは小さい（`app.module.ts` は `stryker.config.json` の `mutate` からも除外している）」と書いていたが、これは誤りなので撤回する。** 差分限定実行では `--mutate` が config の `mutate` 配列を**丸ごと置き換える**ので、除外は効かない（§1.60）。しかも**この節の修正で pathspec を `'apps/api/src'` に広げたことで、`src` 直下の `main.ts` / `app.module.ts` / `openapi.ts` は今後差分に入るようになった。** 取りこぼしを直したことが、除外の無効化を踏みやすくしている。
 
 **手順書への提案**：§5.3 の pathspec をディレクトリ指定（`-- 'apps/api/src'`）にして、拡張子の絞り込みはパイプ側で行う。§3.3 の `'**/package.json'`（§1.23）と併せて、**git の pathspec の `**` を「シェルの `**` と同じ」と思って書いている箇所が手順書に少なくとも 2 箇所ある。**
 
@@ -1100,6 +1121,17 @@ api  core  instrumenter  util
 `"plugins": ["@stryker-mutator/jest-runner"]` のようにワイルドカードを含まない記述にすると、`resolvePluginModules` が bare import として通常の Node モジュール解決に回すため解消する。**web 側（`@stryker-mutator/vitest-runner`）でも症状・原因ともに同一の形で再現した**（§1.48）。
 
 **手順書への提案**：§5.2 に (a) pnpm 環境では `plugins` の明示が必須であること、(b) Node 22.18+ / 23.6+ 系（ネイティブ TS ストリッピングが既定で有効な Node）+ Jest 30 では `.ts` 設定ファイルに `@jest-config-loader ts-node` の docblock が必要になること、(c) コマンドは `pnpm turbo run generate` と書くこと、の 3 点を追記する。**(a) と (c) は手順書の記述だけの問題で、(b) は Node のメジャーバージョンとの相互作用である**（手順書は Node のバージョンを明示していない）。
+
+**逆に、手順書が正しくて計画側が間違っていた箇所が 1 つある（記録として残す）。** 手順書 §5.2 の `$schema` は `./node_modules/@stryker-mutator/core/schema/stryker-schema.json` だが、実装計画が「pnpm workspace では依存はルートの `node_modules` に巻き上げられる」という**実測していない前提**で `../../node_modules/...` に変えていた。実際の配置を `ls` で確認すると逆である。
+
+```
+$ ls -d node_modules/@stryker-mutator
+ls: node_modules/@stryker-mutator: No such file or directory
+$ ls -d apps/api/node_modules/@stryker-mutator/core/schema/stryker-schema.json
+apps/api/node_modules/@stryker-mutator/core/schema/stryker-schema.json
+```
+
+pnpm は**直接依存を各パッケージ配下に symlink する**ので、`apps/api` から見た `./node_modules/...` が正しく、`../../node_modules/...` は存在しないパスを指していた（エディタの補完が効かないだけで Stryker 自体は `$schema` を読まないため、実行には影響しない）。**手順書の原文に戻した。** これは Phase 4 で「実測せずに手順書を直した」唯一の箇所であり、**§1.47 の 3 件とは逆向きの教訓になる——手順書が間違っている前提で読み始めると、正しい記述まで直してしまう**（§1.48 の `related` / `.d.ts` は実測して不要と判断できたが、ここは実測しないまま計画に書かれ、そのまま通った）。
 
 なお `stryker.config.json` は strict JSON である（`ConfigReader.readJsonConfig` が `JSON.parse` を直接呼ぶ）。コメントを 1 行入れると `ERROR Stryker Invalid config file "stryker.config.json". File contains invalid JSON.` で落ちることを実測した。**逸脱の理由を設定ファイル自身に書けない**ので、このリポジトリでは隣接する `jest.stryker.config.ts` / `vitest.config.ts` のコメントに書いている。
 
@@ -1279,9 +1311,17 @@ WRN leaks found: 2
 
 `run-all.sh` は `verification/cases/*/` をアルファベット順で回すので `L2-03` は必ず `L2-04` の直前に来る。**フレークではなく決定論的に再現し、しかも `L2-04` の単体実行では再現しない**（単体では pass に戻る）。**これは申し送り #17（`node_modules` の持ち越し）と同型のケース間隔離の破れである。**
 
-**対処は 2 段階を経ている。記録として両方残す。** 最初に `expect.yml` の `l2-gitleaks` を `fail` に書き換えて吸収した（コミット `10993bb`）。しかし `expect` は「そのケース単体の振る舞い」のスナップショットであるべきで、実行順に依存する値を書くと単体再現性が失われる。**原因（ハーネスの汚染）を断つ側に切り替え**、`run-case.sh` の cleanup で `apps/api/reports/mutation` を削除する形にして（`74fcab1`）、`expect.yml` は Phase 3 の値（`pass`）に戻した（`08e26a8`）。修正後は `L2-03` → `L2-04` の順でも単体でも `l2-gitleaks` が pass、`configVerdict` が `match` で一致する。**16 ケースの通し実行でも `RESULTS.md` に設定ずれの注記は出ていない**（Phase 4 の最終確認）。
+**対処は 2 段階を経ている。記録として両方残す。** 最初に `expect.yml` の `l2-gitleaks` を `fail` に書き換えて吸収した（コミット `10993bb`）。しかし `expect` は「そのケース単体の振る舞い」のスナップショットであるべきで、実行順に依存する値を書くと単体再現性が失われる。**原因（ハーネスの汚染）を断つ側に切り替え**、`run-case.sh` の cleanup で `apps/api/reports/mutation` を削除する形にして（`74fcab1`）、`expect.yml` は Phase 3 の値（`pass`）に戻した（`08e26a8`）。**最終レビューの指摘で `apps/web/reports/mutation` も cleanup の対象に足した**——`GATE_ORDER` に web の mutation ゲートは無いが、手で回した Stryker の残骸（実際に `mutation.html` が残っていた）が同じ経路を持ち、`l2-gitleaks` は `--no-git` で作業ツリー全体を走査するため毎回それを読んでいた。**web のソースに秘密が無いので緑だっただけで、経路は塞がっていなかった。**修正後は `L2-03` → `L2-04` の順でも単体でも `l2-gitleaks` が pass、`configVerdict` が `match` で一致する。**16 ケースの通し実行でも `RESULTS.md` に設定ずれの注記は出ていない**（Phase 4 の最終確認）。
 
-**手順書への提案**：§5.2 でレポーターを指定するなら、**`html` / `json` レポートがソース全文を含むこと**と、その取り扱い（保存場所、保存期間、公開範囲）に触れる必要がある。とくに §7 / nightly の CI で**ミューテーションレポートを成果物としてアーティファクト公開する運用**は、ソースコード全体を（ミューテートされた行の前後の文脈込みで）公開範囲に広げる。手順書は §3.3 で秘密検出を推奨し §5.2 で html レポートを推奨しているが、**この 2 つが同じワークスペースで衝突しうることに触れていない。** 「ある層を足す作業が別の層のゲートを赤くする」という Phase 3 から繰り返し観測されているパターンの一例であると同時に、**今回は「赤くする」だけでなく「秘密が二次的に拡散する」というセキュリティ側の指摘でもある。**
+**`reporters` を省略しても `html` は出る。オプトインではなくオプトアウトである。** `@stryker-mutator/core@9.6.1` の `schema/stryker-schema.json` の `reporters` を実測すると既定値は次のとおりで、`html` が含まれている。
+
+```json
+{"description":"With reporters, you can set the reporters for stryker to use.","type":"array","items":{"type":"string"},"default":["clear-text","progress","html"]}
+```
+
+**反証ではなく裏付けが作業ツリーに現存していた**: `apps/web/stryker.config.json` は `reporters` を 1 度も書いていない（`$schema` も持たない）が、`apps/web/reports/mutation/mutation.html`（309 KB、web のソース全文入り）が生成されている。**したがってこの衝突は「html レポーターを指定した人」だけの問題ではなく、Stryker を既定設定で動かした全員に起きる。**
+
+**手順書への提案**：§5.2 は `reporters` の指定の有無に関わらず、**`html`（既定で有効）と `json` のレポートがミューテート対象のソース全文を含むこと**と、その取り扱い（保存場所、保存期間、公開範囲）に触れる必要がある。「レポーターを設定しなければ安全」ではない。とくに §7 / nightly の CI で**ミューテーションレポートを成果物としてアーティファクト公開する運用**は、ソースコード全体を（ミューテートされた行の前後の文脈込みで）公開範囲に広げる。手順書は §3.3 で秘密検出を推奨し §5.2 で html レポートを推奨しているが、**この 2 つが同じワークスペースで衝突しうることに触れていない。** 「ある層を足す作業が別の層のゲートを赤くする」という Phase 3 から繰り返し観測されているパターンの一例であると同時に、**今回は「赤くする」だけでなく「秘密が二次的に拡散する」というセキュリティ側の指摘でもある。**
 
 ### 1.56 手順書 §5.3 の差分限定実行は、テストファイルだけの変更に原理的に無反応である（`L4-01-empty-assertion` の結論）
 
@@ -1390,6 +1430,36 @@ Total 2 packages affected by 2 known vulnerabilities (0 Critical, 1 High, 1 Medi
 `qs` の override は最初 `6.15.2` を選んだが、これは express 経由の既存依存（`6.15.3`）を**引き下げる**副作用を持っていた。レビューの指摘で `6.15.3` に直し、`pnpm why qs --filter api` で全経路が単一バージョンに集約されることを確認した。**「脆弱性を直す override」が「健全な依存を下げる」形になりうるという、override 運用のもう 1 つのコストである。**
 
 **手順書への提案**：§3.3 に、OSV-Scanner を重大度で足切りせずゲートにするなら、**devDependency 由来の脆弱性が新しいツールを 1 つ入れるたびに発生すること**と、その対処（`overrides`）が (a) `minimumReleaseAge` と衝突して除外リストを伸ばす、(b) 既存の健全な依存を引き下げうる、という 2 つの副作用を持つことを併記する。§1.39 の提案（例外運用のルールを書く）と同じ結論だが、**Phase 4 は「除外リストは実際に伸び続ける」ことの 4 件目の実測データを追加した。**
+
+### 1.60 手順書 §5.3 の `--mutate` は §5.2 の除外設定を丸ごと無効化する。手順書自身の 2 つの節が打ち消し合っている
+
+**手順書 §5.2 は「除外すべき対象：`*.module.ts`、エントリポイント、生成コード。これらを含めるとスコアが不当に下がります」と書く。同じ手順書の §5.3 のスクリプトは、その除外を無効化する。**
+
+原因は Stryker の CLI オプションのマージ規則である。**`@stryker-mutator/core@9.6.1` のソースで確認した。**
+
+- `dist/src/config/config-reader.js` の `readConfig` が、設定ファイルを読んだ結果に対して `deepMerge(options, cliOptions)` を呼ぶ（コメントも `// merge the config from config file and cliOptions (precedence)`）。
+- `@stryker-mutator/util@9.6.1` の `dist/src/deep-merge.js` は 16 行目に `Array.isArray(defaultValue)` を持ち、真なら 17 行目の `defaults[key] = overrideValue` に落ちる。**配列は再帰マージされず上書きされる。**
+
+```js
+if (defaultValue === undefined ||
+    typeof defaultValue !== 'object' ||
+    typeof overrideValue !== 'object' ||
+    Array.isArray(defaultValue)) {
+    defaults[key] = overrideValue;   // ← 配列はここで丸ごと差し替わる
+}
+```
+
+したがって `scripts/stryker-diff.sh` が渡す `--mutate src/foo.ts` は、`apps/api/stryker.config.json` の `mutate`（`src/**/*.ts` と 4 つの除外 `!src/**/*.spec.ts` / `!src/main.ts` / `!src/openapi.ts` / `!src/**/*.module.ts` の計 5 要素）を**捨てる**。**差分限定実行では除外が 1 つも効いていない。**
+
+**このフェーズ自身のログが証拠になっている。** §1.45 の逐語実行で `--mutate apps/api/src/discount/discount.ts`（解決できないパス）を渡したとき `Instrumented 0 source file(s) with 0 mutant(s)` になった。config の `mutate`（`src/**/*.ts`）が併用されていれば 0 にはならず、全ソースがミューテートされていたはずである。
+
+**帰結**：`src/main.ts` に 1 行触った PR は、`--mutate src/main.ts` として実行され、除外されないままミューテートされる。`main.ts` に対応する spec は無いので `enableFindRelatedTests: false` の下では全 mutant が Survived になり（§1.52 の `orders.controller.ts` と同じ形）、**スコア 0 % 付近で `l4-mutation` が fail(1) を返す。** 手順書 §5.2 が「不当に下がる」と言って除外したまさにそのファイルが、§5.3 の実行経路では判定に使われる。
+
+**これは §1.53（薄いファイルに触ると落ちる）より強い形である。** §1.53 は「手順書が意図していない副作用」だが、こちらは**手順書が明示的に除外すると書いたものが、同じ手順書の別の節で復活する**——2 つの節が打ち消し合っている。
+
+**`scripts/stryker-diff.sh` は直していない。** 手順書 §5.3 のとおりに動かして結果を残すのがこのフェーズの方針（人間の決定）だからである。**除外を再適用する選択肢は Phase 5 への申し送り #40 に書いた。**
+
+**手順書への提案**：§5.3 のスクリプトで `--mutate` を使うなら、**§5.2 で書いた除外パターンを差分側のリストから再適用する必要がある**旨を明記する（CLI の配列オプションは設定ファイルの配列を上書きする、という Stryker の仕様を前提として書く）。あるいは `--mutate` を使わず、設定ファイルの `mutate` を差分に応じて生成する形にする。**「PR は差分だけ」と「除外リスト」を両立させる方法を手順書は示していない。**
 
 ---
 
@@ -1564,6 +1634,8 @@ Phase 2 の各タスクで `minor (deferred)` として記録したものを最�
 | 35 | **`src/test/setup.ts` が web の `mutate` 除外パターン漏れで mutate 対象に入っている。** 手順書 §5.2 の除外パターン（`!src/**/*.test.{ts,tsx}` / `!src/main.tsx`）は `src/test/setup.ts` に一致せず、mutant 1 件が生成されて Survived した。**手順書逐語の実測データとして意図的に残してある**（`apps/web/stryker.config.json` は変更していない）。web を nightly に載せるときに、除外を足すか Survived をそのまま報告するかを決めること（§1.48 (3)） |
 | 36 | **`json` / `html` レポーターはミューテート対象のソース全文を埋め込む。** ハーネス側のケース間汚染は `run-case.sh` の cleanup で断ったが（§1.55）、**`cloudbuild.nightly.yaml` でミューテーションレポートを成果物として公開する運用を書くなら、それはソースコード全体を公開範囲に広げる。** 秘密が含まれていれば二次的に拡散する。保存期間・公開範囲・アクセス制御を決めてから書くこと |
 | 37 | **`cloudbuild.pr.yaml` に L4 のステップを書くときの注意が 2 つある。** (a) 手順書 §7 の `l4-mutation` ステップは `corepack enable && ./scripts/stryker-diff.sh` を実行するが、**このリポジトリに `corepack` は入っていない**（CLAUDE.md の環境節）。(b) `scripts/stryker-diff.sh` から `git fetch --no-tags --depth=50` を外したので、**CI では `GATE_BASE_REF` を明示的に渡す必要がある**（渡さないと既定の `origin/main` を見に行き、shallow clone では解決できず `exit 3` → error(2) になる）。`l2-new-deps.sh` と同じ規約なので、両方のステップで同じ変数を渡す形になる |
+| 40 | **`scripts/stryker-diff.sh` は `--mutate` で `stryker.config.json` の除外を無効化している。除外を再適用する選択肢がある**（§1.60）。CLI の配列オプションは設定ファイルの配列を上書きするので、差分限定実行では `!src/main.ts` / `!src/openapi.ts` / `!src/**/*.module.ts` / `!src/**/*.spec.ts` のどれも効いていない。**Phase 4 では意図的に直していない**（手順書 §5.3 のとおりに動かして結果を残すのが方針）。直すなら差分側で同じ除外を再適用する実装案がある: `grep -vE '(^|/)(main\|openapi)\.ts$\|\.module\.ts$'` を `CHANGED` のパイプに足す。**直すかどうかは「手順書どおりの挙動を記録し続ける」ことと「ゲートを実用的にする」ことのどちらを優先するかの判断なので、Phase 5 の着手時に決めること** |
+| 41 | **`l4-mutation` だけが baseline とケースで比較対象（`GATE_BASE_REF`）が違う。知らずに踏むと「ハーネスが壊れた」と誤診する。** `run-all.sh` の baseline ループは `GATE_BASE_REF` を export しないので `stryker-diff.sh` の既定値 `origin/main` が使われる。本ブランチは `apps/api/src` を 1 ファイルも変更していないため、**baseline の `l4-mutation` は `L4_MUTATE_FILES=(none)` のスキップ経路で緑になっている。** ケース実行側は `run-case.sh` がローカルの作業ブランチを渡す。**`GATE_ORDER` の 9 本でこの非対称があるのは `l4-mutation` だけである。** 影響は 2 方向: (a) `RESULTS.md` 冒頭の「対照実行で全ゲートが pass することを確認している」は L4 については何も保証しておらず、**`gates.test.sh` の 3 件も同じスキップ経路を通るので、このリポジトリの自動チェックのどれ一つも「Stryker が実際に起動できる」ことを確認していない**（確認できているのは Task 4 の手動の赤確認だけ）。(b) **将来のブランチが `apps/api/src` を触ると baseline が突然 Stryker を回す。** 触ったのが `orders.service.ts` なら baseline が exit 1 になり、`run-all.sh` は「先にリポジトリを緑にしてください」で**全ケースの判定前に止まる**。申し送り #39（`L5-02` の題材）で Phase 5 が `apps/api/src` を触る可能性は低くない。**`run-all.sh` は Phase 4 では直していない**（直すと baseline が差分ありで回るようになり、影響の確認に別途実測が必要になる。それも Phase 5 の判断） |
 | 38 | **nightly のフル実行（手順書 §5.4）を `cloudbuild.nightly.yaml` に載せる形を決めること。** Phase 4 では対照として手で `pnpm --filter api exec stryker run` を回した。**`incremental` を切ったので、「incremental の誤差をリセットするために nightly でフル実行する」という §5.4 の動機自体がこのリポジトリでは成立しない。** それでも nightly のフル実行には別の価値がある（差分限定では原理的に見えない `L4-01` 型の低下が見える。§1.56）。**その価値は「閾値で止める」ことではなく「baseline からの低下を見る」ことなので、載せるなら比較対象のスコアをどこに保存するかを決める必要がある** |
 | 26 | **`run-all.sh` の所要時間の高速化は Phase 4 でも扱わないと決めた**（計画の決定 4）。Phase 4 の実測は **8 分 7 秒**（16 ケース + 対照実行 33 秒。ゲートは 9 本）。Phase 3 の 3 回の実測（6 分 9 秒 / 6 分 1 秒＝ケース分のみ、14 分 35 秒＝対照実行込み）と比べて、**ゲートが 1 本・ケースが 2 本増えても対照実行込みの数字は下がっている。** **この差の原因は特定していない。** Phase 4 の実行中の load average や Docker のメモリ使用量は測っておらず、§1.38 が負荷を実測したのは Phase 3 の 3 回目だけである。したがって言えるのは「高速化が進んだ証拠ではない」ことと、**§1.38 の「壁時計は再現しない」という結論と整合する追加データである**ことまでである。Phase 5 でケースが 19 本前後になったときに要否を判断すること。判断に使うのは壁時計ではなくゲート別の内訳の構造・専有マシンでの計測・CPU 時間のいずれかにする |
 | 39 | **`L5-02-n-plus-one` の前提を Phase 5 の着手時に決めること**（詳細は §2.2）**。** 「L3 も一緒に赤になるならそのケースは L5 の価値を証明していない」という基準は、L4 の 2 ケースで実測の裏付けが得られた。`L4-02` は L3 が緑のまま L4 も緑で、**「どの層も止めない」ことがそのまま反証データになった**（§1.57）。`L4-01` も同様である。**つまり「主張された層だけが赤くなる」形に作れたケースのほうが主張を検証できる**ので、`L5-02` はクエリ形の固定を外すか、別の題材に作り直すのが妥当である |
