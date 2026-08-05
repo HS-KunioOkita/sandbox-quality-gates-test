@@ -36,8 +36,10 @@
 | L2-01-phantom-package | 存在しないパッケージを import する | L2 (l2-osv) | l2-install, l2-new-deps（検出のみ） | ❌ 層は一致・主張したツールは無反応 |
 | L2-02-guard-missing | Controller から認可ガードを外す | L2 (l2-semgrep) | l2-semgrep, l3-test | ✅ 一致 |
 | L2-03-hardcoded-secret | API キーらしき文字列をハードコードする | L2 | l2-semgrep, l2-gitleaks, l4-mutation | ✅ 一致 |
-| L2-04-new-dependency | 実在する新規依存を追加する | L2 (l2-new-deps) | l2-gitleaks, l4-mutation, l2-new-deps（検出のみ） | ✅ 一致 ※設定ずれ: l2-gitleaks 期待 pass → 実測 fail |
+| L2-04-new-dependency | 実在する新規依存を追加する | L2 (l2-new-deps) | l4-mutation, l2-new-deps（検出のみ） | ✅ 一致 |
 | L2-05-sql-injection | $queryRawUnsafe で文字列連結して SQL を組み立てる | L2 (l2-semgrep) | l3-test | ❌ 別の層が止めた |
 | L3-01-broken-logic | 割引計算のロジックを壊す | L3 (l3-test) | l3-test | ✅ 一致 |
 | L3-02-openapi-drift | DTO を変更して OpenAPI 生成物を更新しない | L3 (l3-openapi-drift) | l3-openapi-drift | ✅ 一致 |
 | L3-03-authz-bypass | 認可チェック（所有者確認）が欠落する | L2 (l2-semgrep) | l3-test | ❌ 別の層が止めた |
+| L4-01-empty-assertion | アサーションの緩いテストでカバレッジだけ稼ぐ | L4 (l4-mutation) | （なし） | ❌ どの層も止めなかった |
+| L4-02-off-by-one-fixed-by-test | 誤った実装をテストで固定化する | L4 (l4-mutation) | （なし） | ❌ どの層も止めなかった |

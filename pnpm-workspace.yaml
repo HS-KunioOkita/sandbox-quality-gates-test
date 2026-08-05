@@ -35,7 +35,7 @@ trustPolicy: no-downgrade     # 更新でセキュリティ設定が引き下げ
 # たびに増えれば保護が空文化する」という minimumReleaseAgeExclude への批判が
 # trustPolicy にもそのまま当てはまるため。takeover のリスクが実際に高い「公開直後の
 # 版」に対する保護はこの設定でも残る。人間の判断で導入した（詳細は
-# docs/superpowers/phase0-findings.md の Phase 4 の項）。
+# docs/superpowers/phase0-findings.md §1.58）。
 trustPolicyIgnoreAfter: 43200
 
 # minimumReleaseAge は「新しく追加しようとしている依存」だけでなく、既に固定している
