@@ -1751,7 +1751,7 @@ Phase 2 の各タスクで `minor (deferred)` として記録したものを最�
 | 項目 | 結果 |
 |---|---|
 | `./scripts/gates/gates.test.sh` | exit 0。**35 件成功**（Phase 2 は 27 件。新規ゲート 2 本の pass / fail / error 経路と呼び出し位置非依存を追加） |
-| `node --test verification/lib/judge.test.mjs` | exit 0。**26 件成功**（Phase 2 は 22 件。非ブロックゲート照合の 2 件を含む） |
+| `node --test verification/lib/judge.test.mjs` | exit 0。**28 件成功**（Phase 2 は 22 件。非ブロックゲート照合の 2 件を含む）。**当初この行は「26 件」と書いていたが転記ミスである。** Phase 3 の PR #4 の本文は同じ項目を「28/28（Phase 2 は 22）」と書いており、`verification/lib/judge.test.mjs` は Phase 3 以降 1 行も変わっていない（Phase 4 で `git diff origin/main..HEAD -- verification/lib/` が空、実測も 28 件）。Phase 4 の受け入れ確認で食い違いに気づき、PR #4 を根拠に訂正した |
 | `shellcheck scripts/gates/*.sh verification/*.sh` | exit 0（指摘 0） |
 | `pnpm turbo typecheck` | exit 0。5 タスク成功 |
 | `pnpm lint`（`eslint . --max-warnings=0`） | exit 0 |
@@ -1805,7 +1805,7 @@ Phase 2 の各タスクで `minor (deferred)` として記録したものを最�
 | 項目 | 結果 |
 |---|---|
 | `./scripts/gates/gates.test.sh` | exit 0。**38 件成功**（Phase 3 は 35 件。`l4-mutation` の pass / error(ツール不在) / 呼び出し位置非依存の 3 件を追加） |
-| `node --test verification/lib/judge.test.mjs` | exit 0。**28 件成功。** `verification/lib/` は Phase 4 で 1 行も変更していない（`git diff origin/main..HEAD -- verification/lib/` が空）。上の Phase 3 の記録は「26 件」だが、`origin/main` の `judge.test.mjs` を数えても 28 件あり、**差の 2 件は Phase 4 由来ではない**（Phase 3 のどの時点で増えたかは追っていない） |
+| `node --test verification/lib/judge.test.mjs` | exit 0。**28 件成功**（Phase 3 と同じ）。`verification/lib/` は Phase 4 で 1 行も変更していない（`git diff origin/main..HEAD -- verification/lib/` が空）。この確認の過程で**上の Phase 3 の記録が「26 件」になっている転記ミスを見つけ、PR #4 の本文（「28/28」）を根拠に訂正した**（Phase 3 の行に経緯を記載） |
 | `shellcheck scripts/gates/*.sh scripts/stryker-diff.sh verification/*.sh` | exit 0（指摘 0）。`scripts/stryker-diff.sh` が検査対象に加わった |
 | `pnpm turbo build typecheck test` | exit 0。**9 タスク成功**、api 28 テスト + web 10 テスト（2 test files） |
 | `pnpm exec eslint . --max-warnings=0` | exit 0 |
