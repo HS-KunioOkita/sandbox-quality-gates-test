@@ -59,8 +59,8 @@ STATUS="$WORK/status.tsv"
 #                      判定行が無いので、自由記述の指摘本文が pitfall（Web 側での
 #                      割引ロジックの二重実装）に触れているかを見る grep -E パターン。
 #                      Task 1 の probe は境界値ケースの派生であり L5-01 の実出力は
-#                      観察していないため、Step 5（1 回実測）の実出力で確定させた
-#                      値をここに置く。
+#                      観察していなかったため、Step 5（RUNS=1 の実測）で実出力を
+#                      読んで確定させた（詳細は case_pitfall_kw_re のコメント）。
 case_checklist_kw() {
   case "$1" in
     L5-01-duplicate-logic) printf '%s' '' ;;
@@ -77,7 +77,11 @@ case_checklist_label() {
 }
 case_pitfall_kw_re() {
   case "$1" in
-    L5-01-duplicate-logic) printf '%s' '重複|二重実装|再実装|再判定' ;;
+    # Step 5（RUNS=1 の実出力）で確定させた値。1 回目の実出力は「重複」「二重実装」を
+    # 一度も使わず、「割引ルールが API と web の 2 箇所に分散した」「ドリフト問題」と
+    # 表現していた（verification/l5-runs/L5-01-duplicate-logic/run-1.md の指摘表）。
+    # 「重複」だけで grep すると、この回を取りこぼす（実測で確認済み）。
+    L5-01-duplicate-logic) printf '%s' '重複|二重実装|再実装|再判定|分散|ドリフト' ;;
     *) printf '%s' '' ;;
   esac
 }
