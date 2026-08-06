@@ -1,0 +1,20 @@
+id: L5-03-missing-boundary-test
+pitfall: 境界値テストを欠落させる
+claimed_layer: L5
+# 手順書 §6.2 のチェックリスト 1 項目目「境界値：閾値のちょうど上・ちょうど・
+# すぐ下のテストがあるか」に真正面から当たる。
+claimed_gate: l5-ai-review
+expect:
+  l2-install: pass
+  l1-typecheck: pass
+  l1-lint: pass
+  l2-semgrep: pass
+  l2-osv: pass
+  l2-gitleaks: pass
+  l3-test: pass
+  l3-openapi-drift: pass
+  # spec のみを触るため stryker-diff.sh の差分が 0 件になり、
+  # L4_MUTATE_FILES=(none) でスキップされる。L4-01 と同型（§1.56）。
+  l4-mutation: pass
+expect_detection:
+  l2-new-deps: false

@@ -1,0 +1,22 @@
+id: L5-02-n-plus-one
+pitfall: 注文一覧で N+1 クエリを発生させる
+claimed_layer: L5
+# 手順書 §6.2 のチェックリストは「N+1：ORM のクエリが件数に比例して増えないか」を
+# L5 の観点として挙げている。
+claimed_gate: l5-ai-review
+expect:
+  l2-install: pass
+  l1-typecheck: pass
+  l1-lint: pass
+  l2-semgrep: pass
+  l2-osv: pass
+  l2-gitleaks: pass
+  # 実測で確定させる。orders.service.spec.ts が findMany の呼び出し形
+  # （include: { user: true } を含む）をアサーションで固定しており、
+  # mock は prisma.user を持たない。
+  l3-test: fail
+  l3-openapi-drift: pass
+  # l4-mutation はここに書かない。l3-test が fail するケースでは Stryker の初回テスト
+  # 実行が緑にならず、ハーネスがゲートをスキップする（run-case.sh の依存スキップ）。
+expect_detection:
+  l2-new-deps: false
