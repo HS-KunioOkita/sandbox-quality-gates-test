@@ -11,9 +11,10 @@ expect:
   l2-semgrep: pass
   l2-osv: pass
   l2-gitleaks: pass
-  # 実測で確定させる。orders.service.spec.ts が findMany の呼び出し形
+  # 実測: fail。orders.service.spec.ts が findMany の呼び出し形
   # （include: { user: true } を含む）をアサーションで固定しており、
-  # mock は prisma.user を持たない。
+  # mock は prisma.user を持たない。findUniqueOrThrow の呼び出しで
+  # TypeError（prisma.user が undefined）が発生し、テストが落ちる。
   l3-test: fail
   l3-openapi-drift: pass
   # l4-mutation はここに書かない。l3-test が fail するケースでは Stryker の初回テスト

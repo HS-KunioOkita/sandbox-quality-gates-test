@@ -11,9 +11,11 @@ expect:
   l2-semgrep: pass
   l2-osv: pass
   l2-gitleaks: pass
+  # 実測: pass。削除した 3 件以外のテスト（非会員・端数切り捨て・0 円・
+  # プロパティ 3 件）は変更しておらずそのまま通る。
   l3-test: pass
   l3-openapi-drift: pass
-  # spec のみを触るため stryker-diff.sh の差分が 0 件になり、
+  # 実測: pass。spec のみを触るため stryker-diff.sh の差分が 0 件になり、
   # L4_MUTATE_FILES=(none) でスキップされる。L4-01 と同型（§1.56）。
   l4-mutation: pass
 expect_detection:
