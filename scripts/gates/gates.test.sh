@@ -78,6 +78,15 @@ for gate in "${GATE_ORDER[@]}"; do
   check "$gate は / から呼んでも pass" 0 "$?"
 done
 
+# --- L5（非ブロック・GATE_ORDER 外）の error 経路 ---
+# l5-ai-review は exit code で欠陥を主張しない(常に 0)。したがって
+# 「動かなかったのに緑」を防げるのは error(2) のガードだけである。そこを直接突く。
+GATE_BASE_REF=refs/heads/does-not-exist ./scripts/gates/l5-ai-review.sh >/dev/null 2>&1
+check 'l5-ai-review は比較対象が無いとき error' 2 "$?"
+
+env -i PATH=/usr/bin:/bin HOME="$HOME" bash ./scripts/gates/l5-ai-review.sh >/dev/null 2>&1
+check 'l5-ai-review は claude が無いとき error' 2 "$?"
+
 if [ "$FAILURES" -eq 0 ]; then
   printf '\n全 %s 件のチェックが成功しました\n' "$TOTAL"
   exit 0
