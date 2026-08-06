@@ -36,12 +36,26 @@ if ! git rev-parse --verify --quiet "$BASE_REF" >/dev/null; then
 fi
 
 OUT="${L5_REVIEW_OUT:-reports/l5/review.md}"
-mkdir -p "${OUT%/*}" || exit 2
+# fix round 1: ${OUT%/*} はスラッシュを含まない相対パス（例 review.md）に対して
+# 文字列をそのまま返すため、mkdir -p "$OUT" と同義になり「出力ファイルと同名の
+# ディレクトリ」を作ってしまっていた（レビュアが再現）。dirname はスラッシュが
+# 無ければ "." を返すので同じ事故を避けられる。
+mkdir -p "$(dirname "$OUT")" || exit "$GATE_ERROR"
 
 # 手順書 §6.3 の逐語は `claude -p "/code-review origin/$_BASE_BRANCH...HEAD"`。
 # 比較対象だけを GATE_BASE_REF に置き換える（l2-new-deps.sh と同じ規約。#37(b)）。
 claude -p "/code-review $BASE_REF...HEAD" --output-format text >"$OUT" 2>&1
 raw=$?
+
+# リダイレクト自体が失敗する場合（$OUT と同名のディレクトリが既にある、書き込み
+# 権限が無い等）claude は一度も起動せず、raw にはシェルのリダイレクト失敗コードが
+# 入る。これを「claude が非ゼロで終わった」と区別せずに pass で返すと、ツールが
+# 実行できなかった状態が緑として記録される（設計書 §6.1 が最重要視する誤判定）。
+# 出力先が実在する通常ファイルになっているかで区別する。
+if [ ! -f "$OUT" ]; then
+  printf 'gate error: 出力先に書き込めませんでした: %s\n' "$OUT" >&2
+  exit "$GATE_ERROR"
+fi
 
 # 手順書 §6.3 の `|| true` に相当する。claude が非ゼロで終わっても
 # ブロックしない。ただし何が起きたかは残す。
