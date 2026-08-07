@@ -94,22 +94,76 @@ check 'l5-ai-review は claude が無いとき error' 2 "$?"
 # 起動できる」ことを確認していなかった**。ここで初めてその経路を通す。
 #
 # 一時ブランチを切って無害な差分を 1 つ作り、元ブランチを GATE_BASE_REF に渡す。
-_l4_base=$(git rev-parse --abbrev-ref HEAD)
-git checkout --quiet -b tmp/gates-test-l4
-printf '\n// gates.test.sh が Stryker の実起動を確認するための一時的な差分\n' >> apps/api/src/discount/discount.ts
-# -a ではなく対象ファイルを明示する。-a は追跡中の全変更をステージするため、
-# gates.test.sh 自身の未コミット編集など無関係な変更まで一時ブランチのコミットに
-# 混入し、後段の branch -D で失われる（実測で発生）。
-git commit --quiet -m "tmp: gates.test.sh の L4 実起動確認" -- apps/api/src/discount/discount.ts
-GATE_BASE_REF="$_l4_base" ./scripts/stryker-diff.sh >/tmp/gates-test-l4.log 2>&1
-check 'stryker-diff は差分があるとき Stryker を起動して pass' 0 "$?"
-grep -qE 'L4_MUTATE_FILES=src/discount/discount.ts' /tmp/gates-test-l4.log
-check 'stryker-diff はミューテート対象を出力する' 0 "$?"
-grep -qE 'Mutation score|mutant\(s\)' /tmp/gates-test-l4.log
-check 'stryker-diff は実際に mutant を実行する' 0 "$?"
-git checkout --quiet "$_l4_base"
-git branch -D tmp/gates-test-l4 >/dev/null 2>&1
-rm -rf apps/api/reports/mutation
+# run-case.sh（verification/run-case.sh:58-73, 79-83, 212-218）と同じ 3 つの防御を
+# 持たせる。無くても「下流のコマンドが非ゼロで返る」失敗では -e が無いこの
+# スクリプトはブロック末尾まで到達して後始末できるが、それとは別の 2 つの
+# 失敗クラス——(1) 前回の異常終了でブランチが残っている場合の checkout -b 自体の
+# 失敗、(2) Stryker 実行中の割り込み（Ctrl-C 等）——は末尾の後始末に到達する前に
+# 状態を壊す。前者は実ブランチへの意図しないコミットを、後者は Stryker の
+# mutation レポート（ミューテート対象のソース全文を埋め込む。§1.55 と同型の
+# 汚染経路）の残留を招く。
+#   1. 入口で残存ブランチと detached HEAD を検出する（run-case.sh:58-73 と同型）。
+#   2. trap で割り込み時も後始末する（run-case.sh:79-83 と同型）。
+#   3. 後始末の後、実際に元ブランチへ戻れたか・一時ブランチが消えたかを検査する
+#      （run-case.sh:212-218 と同型）。cleanup 内の git は || true で握り潰して
+#      いるため、失敗しても何も起きない。
+# 残るリスク: SIGKILL のように trap 自体が発火しない終了はここでも防げない。
+# その場合の手動復旧は次の cleanup 関数と同じ内容
+# （git checkout -f <元ブランチ> && git branch -D tmp/gates-test-l4 &&
+#   rm -rf apps/api/reports/mutation）。
+_l4_selftest() {
+  local base
+  base=$(git rev-parse --abbrev-ref HEAD)
+  if [ "$base" = "HEAD" ]; then
+    printf 'stryker-diff の実起動チェック: detached HEAD では実行できません\n' >&2
+    return 2
+  fi
+  if git show-ref --quiet refs/heads/tmp/gates-test-l4; then
+    printf 'stryker-diff の実起動チェック: ブランチ tmp/gates-test-l4 が残っています。前回が異常終了しています\n' >&2
+    printf '  復旧: git branch -D tmp/gates-test-l4\n' >&2
+    return 2
+  fi
+
+  _l4_cleanup() {
+    git checkout --quiet "$base" 2>/dev/null || true
+    git branch -D tmp/gates-test-l4 >/dev/null 2>&1 || true
+    rm -rf apps/api/reports/mutation
+  }
+  trap _l4_cleanup EXIT
+
+  if ! git checkout --quiet -b tmp/gates-test-l4; then
+    printf 'stryker-diff の実起動チェック: 一時ブランチを作成できませんでした\n' >&2
+    _l4_cleanup
+    trap - EXIT
+    return 2
+  fi
+
+  printf '\n// gates.test.sh が Stryker の実起動を確認するための一時的な差分\n' >> apps/api/src/discount/discount.ts
+  # -a ではなく対象ファイルを明示する。-a は追跡中の全変更をステージするため、
+  # gates.test.sh 自身の未コミット編集など無関係な変更まで一時ブランチのコミットに
+  # 混入し、後段の branch -D で失われる（実測で発生）。
+  git commit --quiet -m "tmp: gates.test.sh の L4 実起動確認" -- apps/api/src/discount/discount.ts
+
+  GATE_BASE_REF="$base" ./scripts/stryker-diff.sh >/tmp/gates-test-l4.log 2>&1
+  check 'stryker-diff は差分があるとき Stryker を起動して pass' 0 "$?"
+  grep -qE 'L4_MUTATE_FILES=src/discount/discount\.ts' /tmp/gates-test-l4.log
+  check 'stryker-diff はミューテート対象を出力する' 0 "$?"
+  grep -qE 'Mutation score|mutant\(s\)' /tmp/gates-test-l4.log
+  check 'stryker-diff は実際に mutant を実行する' 0 "$?"
+
+  _l4_cleanup
+  trap - EXIT
+
+  if [ "$(git rev-parse --abbrev-ref HEAD)" != "$base" ] || git show-ref --quiet refs/heads/tmp/gates-test-l4; then
+    printf 'stryker-diff の実起動チェック: %s への復帰に失敗しました。手動で復旧してください\n' "$base" >&2
+    printf '  復旧: git checkout -f %s && git branch -D tmp/gates-test-l4\n' "$base" >&2
+    return 1
+  fi
+  return 0
+}
+
+_l4_selftest
+check 'stryker-diff の実起動チェックが安全に完走する（前提確認と後始末を含む）' 0 "$?"
 
 if [ "$FAILURES" -eq 0 ]; then
   printf '\n全 %s 件のチェックが成功しました\n' "$TOTAL"
