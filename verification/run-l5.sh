@@ -100,10 +100,19 @@ extract_checklist() {
   ' "$1"
 }
 
-# 表の行から項目列・判定列を取り出す。"**該当**" のような強調記号を剥がし前後の
-# 空白を落としてから、項目列に kw が部分一致する行の判定列を返す。ヘッダ行
-# （項目|判定|理由）と区切り行（---|---|---）は項目列が "項目" または "-" の連続に
-# なるので明示的に除外する。
+# 表の行から項目セルと判定セルを取り出す。**列位置には依存しない**。
+#
+# Step 5（RUNS=1）は 3 列（項目|判定|理由）だったが、Step 7（RUNS=5）の実出力の
+# 1 本（L5-03 run-4）は先頭に "#" の番号列が付いた 4 列（#|項目|判定|理由）だった。
+# 列位置 f[2]/f[3] に依存する実装は、この回だけ項目セルとして "4"（番号）を読み、
+# キーワードに一致せず判定を取りこぼす（実測で発覚。5/5 該当のはずが 4/5 と出た）。
+#
+# 代わりに、行内のどのセルが「項目」でどのセルが「判定」かを内容で判定する。
+# 判定セルは "該当" または "非該当" で始まるセル（前方一致）と定義する。この
+# 前方一致（^該当 / ^非該当）は、「非該当」が文字列として「該当」を含むために
+# 単純な部分一致だと毎回ヒットしてしまう問題（Step 1 で観察。probe2-no-skill.md
+# にも散文として「境界値」が出た偽陽性と同型）を、位置指定なしで解決する。
+# "非該当" は "非" から始まるので ^該当 には一致しない。
 checklist_judgment() {
   local file="$1" kw="$2"
   extract_checklist "$file" | awk -v kw="$kw" '
@@ -112,13 +121,15 @@ checklist_judgment() {
       line = $0
       gsub(/\*\*/, "", line)
       n = split(line, f, "|")
-      if (n < 4) next
-      item = f[2]
-      gsub(/^[ \t]+|[ \t]+$/, "", item)
-      if (item == "項目" || item ~ /^-+$/) next
-      if (index(item, kw) > 0) {
-        judgment = f[3]
-        gsub(/^[ \t]+|[ \t]+$/, "", judgment)
+      has_kw = 0
+      judgment = ""
+      for (i = 1; i <= n; i++) {
+        cell = f[i]
+        gsub(/^[ \t]+|[ \t]+$/, "", cell)
+        if (kw != "" && index(cell, kw) > 0) has_kw = 1
+        if (cell ~ /^該当/ || cell ~ /^非該当/) judgment = cell
+      }
+      if (has_kw && judgment != "") {
         print judgment
         exit
       }
@@ -127,19 +138,17 @@ checklist_judgment() {
 }
 
 # checklist_judgment が返した判定文字列が「該当」（「非該当」ではない）かを 0/1 で返す。
-# 「非該当」は文字列として「該当」を含むため、"該当" を先に見る単純な判定は毎回
-# ヒットしてしまう（Step 1 で観察。probe2-no-skill.md にも散文として「境界値」が
-# 出るのと同型の偽陽性）。"非該当" を先に判定して弾く。
+# 前方一致なので "非該当" は該当しない（上のコメント参照）。
 is_hit() {
   case "$1" in
-    *非該当*) printf '0' ;;
-    *該当*) printf '1' ;;
+    該当*) printf '1' ;;
     *) printf '0' ;;
   esac
 }
 
 # 対象キーワード以外の 7 項目に「該当」の行があるか（L5-02 / L5-03 の
-# 「チェックリスト外の指摘」列に使う）。
+# 「チェックリスト外の指摘」列に使う）。判定セルの特定方法は checklist_judgment と同じ
+# （列位置に依存しない）。
 other_checklist_hit() {
   local file="$1" kw="$2"
   extract_checklist "$file" | awk -v kw="$kw" '
@@ -148,14 +157,15 @@ other_checklist_hit() {
       line = $0
       gsub(/\*\*/, "", line)
       n = split(line, f, "|")
-      if (n < 4) next
-      item = f[2]
-      gsub(/^[ \t]+|[ \t]+$/, "", item)
-      if (item == "項目" || item ~ /^-+$/) next
-      if (kw != "" && index(item, kw) > 0) next
-      judgment = f[3]
-      gsub(/^[ \t]+|[ \t]+$/, "", judgment)
-      if (judgment !~ /非該当/ && judgment ~ /該当/) found = 1
+      has_kw = 0
+      judgment = ""
+      for (i = 1; i <= n; i++) {
+        cell = f[i]
+        gsub(/^[ \t]+|[ \t]+$/, "", cell)
+        if (kw != "" && index(cell, kw) > 0) has_kw = 1
+        if (cell ~ /^該当/ || cell ~ /^非該当/) judgment = cell
+      }
+      if (!has_kw && judgment ~ /^該当/) found = 1
     }
     END { print found }
   '
