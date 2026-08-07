@@ -61,6 +61,11 @@ STATUS="$WORK/status.tsv"
 #                      Task 1 の probe は境界値ケースの派生であり L5-01 の実出力は
 #                      観察していなかったため、Step 5（RUNS=1 の実測）で実出力を
 #                      読んで確定させた（詳細は case_pitfall_kw_re のコメント）。
+#   pitfall_target_file: pitfall_kw_re の一致をさらに絞るためのファイル名（部分一致）。
+#                      キーワード一致だけだと「診断対象ファイルには触れていない、
+#                      別の指摘の中で偶然キーワードが出た」回を誤って数える
+#                      （fix round 1 でレビュアが実測で発見。詳細は pitfall_mentioned
+#                      のコメント）。
 case_checklist_kw() {
   case "$1" in
     L5-01-duplicate-logic) printf '%s' '' ;;
@@ -77,11 +82,21 @@ case_checklist_label() {
 }
 case_pitfall_kw_re() {
   case "$1" in
-    # Step 5（RUNS=1 の実出力）で確定させた値。1 回目の実出力は「重複」「二重実装」を
-    # 一度も使わず、「割引ルールが API と web の 2 箇所に分散した」「ドリフト問題」と
-    # 表現していた（verification/l5-runs/L5-01-duplicate-logic/run-1.md の指摘表）。
-    # 「重複」だけで grep すると、この回を取りこぼす（実測で確認済み）。
-    L5-01-duplicate-logic) printf '%s' '重複|二重実装|再実装|再判定|分散|ドリフト' ;;
+    # Step 5（RUNS=1）は「重複」「二重実装」を使わず「割引ルールが API と web の
+    # 2 箇所に分散した」「ドリフト問題」と表現していた。fix round 1 のレビューで、
+    # Step 7（RUNS=5）の run-2 は「二重化」を使っており、このパターンにも入っていな
+    # かったことが判明した（run-2 が 5/5 に数えられたのは、たまたま別の指摘文中に
+    # 「再判定」という語が出ていたための偶然の一致だった）。表現の揺れは今後も
+    # 増える前提で、"2 箇所"/"2 か所" という定型的な数え方の表現も候補に加えて
+    # 頑健性を上げているが、これでも新しい言い回しを取りこぼす可能性は残る
+    # （L5-REVIEW.md に残る限界として明記）。
+    L5-01-duplicate-logic) printf '%s' '重複|二重化|二重実装|再実装|再判定|分裂|分散|ドリフト|2 ?箇所|2 ?か所' ;;
+    *) printf '%s' '' ;;
+  esac
+}
+case_pitfall_target_file() {
+  case "$1" in
+    L5-01-duplicate-logic) printf '%s' 'orderTotal.ts' ;;
     *) printf '%s' '' ;;
   esac
 }
@@ -94,6 +109,24 @@ extract_checklist() {
   awk '
     /^## / {
       insec = ($0 ~ /チェックリスト/) ? 1 : 0
+      next
+    }
+    insec && /^\|/ { print }
+  ' "$1"
+}
+
+# 「指摘」表（重大度|ファイル:行|指摘|根拠）だけを抜き出す。L5-01 の pitfall_mentioned
+# 専用（extract_checklist と対になる）。差分の要約文（ファイル先頭、表より前）は
+# 「〜を web 側で再判定する実装に変わっている」のように、レビュー結果ではなく
+# 単に diff の内容を機械的に説明する行なので、そこにキーワードが出ても「自発的に
+# 問題として指摘した」ことにはならない。fix round 1 のレビューはこの区別が
+# 無かったことも間接的な原因として指摘している（要約文での偶然の一致は無かったが、
+# 指摘表の別の行での偶然の一致と同じ根本原因: キーワードがどの文脈で出たかを
+# 見ていなかった）。
+extract_findings() {
+  awk '
+    /^## / {
+      insec = ($0 ~ /指摘/) ? 1 : 0
       next
     }
     insec && /^\|/ { print }
@@ -171,15 +204,42 @@ other_checklist_hit() {
   '
 }
 
-# L5-01 専用: チェックリストに対応項目が無いケースで、自由記述の指摘（本文全体）が
-# pitfall 自体に触れているか。
+# L5-01 専用: チェックリストに対応項目が無いケースで、「指摘」表の行が pitfall
+# 自体に触れているか。
+#
+# fix round 1 のレビューで発覚した問題: 当初は `grep -Eq "$pattern" "$file"` で
+# ファイル全体を見ていたため、(1) 差分の要約文（レビュー結果ではなく diff の
+# 説明）や (2) pitfall と無関係な別の指摘の文中で、たまたまキーワードが出た回まで
+# 「自発的に指摘した」と数えていた（実測: run-2 は「二重化」を使わず、`isMember`
+# 欠落についての別の指摘文中の「再判定」で偶然ヒットしていた）。
+#
+# 対策は 2 段: (1) 検索範囲を「指摘」表の行だけに絞る（extract_findings）。
+# (2) キーワードに一致した行が、対象ファイル名（filehint）にも触れていることを
+# 追加で要求する。`grep pattern | grep -F filehint` は「同じ行が両方を満たす」ことを
+# 保証する（1 段目の grep で行が絞られた後段に 2 段目を適用するため）。
+#
+# 残る限界: これでもキーワードの列挙に依存している以上、将来 filehint には触れて
+# いるがどのキーワードにも一致しない言い回しが出れば取りこぼす。L5-REVIEW.md に
+# 明記する。
 pitfall_mentioned() {
-  local file="$1" pattern="$2"
+  local file="$1" pattern="$2" filehint="$3"
   if [ -z "$pattern" ]; then
     printf '0'
     return
   fi
-  if grep -Eq "$pattern" "$file"; then
+  local rows
+  rows=$(extract_findings "$file")
+  if [ -z "$rows" ]; then
+    printf '0'
+    return
+  fi
+  if [ -n "$filehint" ]; then
+    if printf '%s\n' "$rows" | grep -E "$pattern" | grep -Fq "$filehint"; then
+      printf '1'
+    else
+      printf '0'
+    fi
+  elif printf '%s\n' "$rows" | grep -Eq "$pattern"; then
     printf '1'
   else
     printf '0'
@@ -309,12 +369,26 @@ done
   printf '  重複・設計一貫性の項目が無い。「n/a」はハーネスの欠落ではなく手順書の欠落を示す。\n'
   printf -- '- **n=%s の比率であり、統計的な信頼区間ではない。** 分母は実行回数 %s で固定する。\n' "$RUNS" "$RUNS"
   printf '  実行不能だった回も分母に残し、実行不能列で別に数える（「指摘しなかった」と\n'
-  printf '  「実行できなかった」を混ぜない）。\n'
+  printf '  「実行できなかった」を混ぜない）。実行不能には (1) ゲート自体が失敗した回、\n'
+  printf '  (2) claude が非ゼロで終わった回、(3) 出力が空だった回、(4) 出力はあるが\n'
+  printf '  期待した表（チェックリスト表 / 指摘表）が 1 行も見つからず解析できなかった回、\n'
+  printf '  の 4 種を含める。(4) を「非該当」や「自発的指摘なし」に混ぜないのは (2)(3) と\n'
+  printf '  同じ理由——判定不能を判定結果として数えると、揺れの実測が誤って希釈される。\n'
   # 同上（Markdown のコードスパン表記。展開させない意図）
   # shellcheck disable=SC2016
   printf -- '- **偽陽性列は人が数える。** 基準は「そのケースの `case.patch` が触っていない箇所への\n'
   printf '  指摘」。パッチが触った箇所への指摘は、的外れでも差分に反応したことになるため\n'
-  printf '  区別する。\n\n'
+  printf '  区別する。\n'
+  # 同上（Markdown のコードスパン表記。展開させない意図）
+  # shellcheck disable=SC2016
+  printf -- '- **`L5-01` の「チェックリスト外の指摘」列（自発的な pitfall 検出）はキーワード\n'
+  printf '  一致に依存しており、表現の揺れに対して原理的に頑健ではない。** fix round 1 で、\n'
+  printf '  当初のキーワード集合が実際には表現の揺れ（「二重化」）を取りこぼしており、\n'
+  printf '  別の指摘文中の偶然の一致で 5/5 という結果に「たまたま」到達していたことが\n'
+  printf '  判明した。検索範囲を「指摘」表の行に絞り、対象ファイル名への言及も要求する\n'
+  printf '  ことで誤検出の経路は塞いだが、キーワード集合自体は列挙である以上、今後\n'
+  printf '  新しい言い回し（キーワードに一致せず対象ファイルには触れている回）が\n'
+  printf '  出れば取りこぼす可能性が残る。\n\n'
   printf '| ケース | 対応するチェックリスト項目 | 該当と判定 | チェックリスト外の指摘 | 偽陽性 | 実行不能 |\n'
   printf '|---|---|---|---|---|---|\n'
 } >"$REVIEW"
@@ -323,6 +397,7 @@ for case_id in $CASES; do
   kw=$(case_checklist_kw "$case_id")
   label=$(case_checklist_label "$case_id")
   pitfall_re=$(case_pitfall_kw_re "$case_id")
+  pitfall_file=$(case_pitfall_target_file "$case_id")
   hit_count=0
   other_count=0
   unusable_count=0
@@ -336,8 +411,27 @@ for case_id in $CASES; do
     else
       gate_exit=$(printf '%s' "$status_line" | cut -f3)
       size=$(printf '%s' "$status_line" | cut -f4)
-      if [ "$gate_exit" != "0" ] || [ "$size" -eq 0 ]; then
+      claude_nonzero=$(printf '%s' "$status_line" | cut -f5)
+      # claude_nonzero は run_one が既に記録しているが、fix round 1 まで
+      # ここで読まれていなかった。claude が非ゼロで終わりつつ $OUT に空でない
+      # エラーメッセージ/部分出力を書いた回（l5-ai-review.sh:47 は stdout と
+      # stderr の両方を $OUT にリダイレクトするため起こりうる）を size>0 だけで
+      # usable と判定すると、その回のチェックリスト表が見つからず「該当しなかった」
+      # に化ける。Global Constraints が名指しで禁じている取り違えなので、
+      # claude_nonzero も usable の必要条件にする。
+      if [ "$gate_exit" != "0" ] || [ "$size" -eq 0 ] || [ "$claude_nonzero" != "0" ]; then
         usable=0
+      fi
+    fi
+    # status.tsv 上は usable でも、期待した表（チェックリスト表 or 指摘表）が
+    # 実出力から 1 行も抜き出せない回は「解析できなかった」であり、「非該当」や
+    # 「自発的指摘なし」とは区別する必要がある（extract_checklist / extract_findings
+    # は見出しが無いと黙って空を返すため、この区別を呼び出し側で明示的に行う）。
+    if [ "$usable" -eq 1 ]; then
+      if [ -n "$kw" ]; then
+        [ -z "$(extract_checklist "$f")" ] && usable=0
+      else
+        [ -z "$(extract_findings "$f")" ] && usable=0
       fi
     fi
     if [ "$usable" -eq 0 ]; then
@@ -346,7 +440,7 @@ for case_id in $CASES; do
       [ "$(is_hit "$(checklist_judgment "$f" "$kw")")" = "1" ] && hit_count=$((hit_count + 1))
       [ "$(other_checklist_hit "$f" "$kw")" = "1" ] && other_count=$((other_count + 1))
     else
-      [ "$(pitfall_mentioned "$f" "$pitfall_re")" = "1" ] && other_count=$((other_count + 1))
+      [ "$(pitfall_mentioned "$f" "$pitfall_re" "$pitfall_file")" = "1" ] && other_count=$((other_count + 1))
     fi
     i=$((i + 1))
   done
