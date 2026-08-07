@@ -1,0 +1,23 @@
+diff --git a/apps/api/src/orders/orders.service.ts b/apps/api/src/orders/orders.service.ts
+index 4fc94c6..1ef5295 100644
+--- a/apps/api/src/orders/orders.service.ts
++++ b/apps/api/src/orders/orders.service.ts
+@@ -28,11 +28,16 @@ export class OrdersService {
+   async findByUser(userId: string): Promise<OrderResponseDto[]> {
+     const orders = await this.prisma.order.findMany({
+       where: { userId },
+-      include: { user: true },
+       orderBy: { createdAt: 'desc' },
+     });
+ 
+-    return orders.map(toOrderResponse);
++    const withUser = [];
++    for (const order of orders) {
++      const user = await this.prisma.user.findUniqueOrThrow({ where: { id: order.userId } });
++      withUser.push({ ...order, user });
++    }
++
++    return withUser.map(toOrderResponse);
+   }
+ 
+   /**

@@ -1,0 +1,22 @@
+id: L5-01-duplicate-logic
+pitfall: 割引ロジックを Web 側に二重実装する
+claimed_layer: L5
+# 手順書 §10 は「設計の一貫性が崩れ、重複が増える」を L5 / 人間 に割り当て、
+# 具体策として「チェックリスト＋CODEOWNERS」を挙げている。
+claimed_gate: l5-ai-review
+expect:
+  l2-install: pass
+  l1-typecheck: pass
+  l1-lint: pass
+  l2-semgrep: pass
+  l2-osv: pass
+  l2-gitleaks: pass
+  # 実測: pass。閾値判定を web 側で再実装しても既存テスト（isDiscountApplied /
+  # OrderList）のアサーションはどちらも新しい判定結果と一致するため落ちない。
+  l3-test: pass
+  l3-openapi-drift: pass
+  # 実測: pass。apps/web しか触らないため stryker-diff.sh の差分（apps/api/src 配下の
+  # 非 spec .ts）が 0 件になり、L4_MUTATE_FILES=(none) でスキップされる。
+  l4-mutation: pass
+expect_detection:
+  l2-new-deps: false

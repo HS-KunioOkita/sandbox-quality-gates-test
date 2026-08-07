@@ -81,7 +81,18 @@ printf -- '--- baseline: %s 秒 ---\n' "$((SECONDS - baseline_started))" >&2
   # 同上（Markdown のコードスパン表記。展開させない意図）
   # shellcheck disable=SC2016
   printf -- '- **「止めた」と「検出した」を区別している。** 非ブロックゲート（`l2-new-deps`）は\n'
-  printf '  exit code で欠陥を主張しないので、検出した場合は「（検出のみ）」と注記する。\n\n'
+  printf '  exit code で欠陥を主張しないので、検出した場合は「（検出のみ）」と注記する。\n'
+  # 同上（Markdown のコードスパン表記。展開させない意図）
+  # shellcheck disable=SC2016
+  printf -- '- **L5（AI レビュー）はこの表に出ない。** `l5-ai-review` は `GATE_ORDER` にも\n'
+  # 同上（Markdown のコードスパン表記。展開させない意図）
+  # shellcheck disable=SC2016
+  printf '  `GATE_DETECTION` にも入れていない（`claude -p` は非決定的で、1 回の結果を\n'
+  printf '  この表に固定すると誤読を生むため）。L5 系 3 ケースの「実際に止めた層」列が\n'
+  printf '  空になるのはそのためで、AI レビューが指摘しなかったことを意味しない。\n'
+  # 同上（Markdown のコードスパン表記。展開させない意図）
+  # shellcheck disable=SC2016
+  printf '  L5 の実測は `verification/L5-REVIEW.md` にある。\n\n'
   printf '| ケース | 落とし穴 | 手順書の主張 | 実際に止めた層 | 判定 |\n'
   printf '|---|---|---|---|---|\n'
 } >"$WORK/head.md"

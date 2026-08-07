@@ -78,6 +78,114 @@ for gate in "${GATE_ORDER[@]}"; do
   check "$gate は / から呼んでも pass" 0 "$?"
 done
 
+# --- L5（非ブロック・GATE_ORDER 外）の error 経路 ---
+# l5-ai-review は exit code で欠陥を主張しない（常に 0）。したがって
+# 「動かなかったのに緑」を防げるのは error(2) のガードだけである。そこを直接突く。
+#
+# l5-ai-review.sh は gate_require_cmd claude（ref 検査より前）を呼ぶ。§1.13 の表 #9
+# （Docker ガードの検証が PATH 剥がしで docker バイナリ不在の分岐に化けていた件）と
+# 完全に同型の罠がここにもある: claude が入っていないマシンでは、下の 1 件目の check も
+# gate_require_cmd 由来の exit 2 を見て pass してしまい、ref ガードを丸ごと削除しても
+# 緑のままになる。exit code だけでは 2 つの分岐を区別できないので、メッセージで到達点を
+# 確かめる（scripts/gates/gates.test.sh の Docker デーモン検証と同じ手法）。
+out=$( GATE_BASE_REF=refs/heads/does-not-exist ./scripts/gates/l5-ai-review.sh 2>&1 )
+code=$?
+check 'l5-ai-review は比較対象が無いとき error' 2 "$code"
+case "$out" in
+  *'比較対象の ref が見つかりません'*)
+    check 'l5-ai-review は ref 検査の分岐に到達する' 'ref-msg' 'ref-msg' ;;
+  *)
+    check 'l5-ai-review は ref 検査の分岐に到達する' 'ref-msg' 'other-msg' ;;
+esac
+
+out=$( env -i PATH=/usr/bin:/bin HOME="$HOME" bash ./scripts/gates/l5-ai-review.sh 2>&1 )
+code=$?
+check 'l5-ai-review は claude が無いとき error' 2 "$code"
+case "$out" in
+  *'コマンドが見つかりません: claude'*)
+    check 'l5-ai-review は claude 不在の分岐に到達する' 'claude-msg' 'claude-msg' ;;
+  *)
+    check 'l5-ai-review は claude 不在の分岐に到達する' 'claude-msg' 'other-msg' ;;
+esac
+
+# --- L4 が実際に Stryker を起動できることを確認する（申し送り #41） ---
+# run-all.sh の baseline も既存のテストも、apps/api/src に差分が無い状態でしか
+# stryker-diff.sh を呼んでいない。どちらも L4_MUTATE_FILES=(none) のスキップ経路で
+# 緑になるため、**このリポジトリの自動チェックのどれ一つも「Stryker が実際に
+# 起動できる」ことを確認していなかった**。ここで初めてその経路を通す。
+#
+# 一時ブランチを切って無害な差分を 1 つ作り、元ブランチを GATE_BASE_REF に渡す。
+# run-case.sh（verification/run-case.sh:58-73, 79-83, 212-218）と同じ 3 つの防御を
+# 持たせる。無くても「下流のコマンドが非ゼロで返る」失敗では -e が無いこの
+# スクリプトはブロック末尾まで到達して後始末できるが、それとは別の 2 つの
+# 失敗クラス——(1) 前回の異常終了でブランチが残っている場合の checkout -b 自体の
+# 失敗、(2) Stryker 実行中の割り込み（Ctrl-C 等）——は末尾の後始末に到達する前に
+# 状態を壊す。前者は実ブランチへの意図しないコミットを、後者は Stryker の
+# mutation レポート（ミューテート対象のソース全文を埋め込む。§1.55 と同型の
+# 汚染経路）の残留を招く。
+#   1. 入口で残存ブランチと detached HEAD を検出する（run-case.sh:58-73 と同型）。
+#   2. trap で割り込み時も後始末する（run-case.sh:79-83 と同型）。
+#   3. 後始末の後、実際に元ブランチへ戻れたか・一時ブランチが消えたかを検査する
+#      （run-case.sh:212-218 と同型）。cleanup 内の git は || true で握り潰して
+#      いるため、失敗しても何も起きない。
+# 残るリスク: SIGKILL のように trap 自体が発火しない終了はここでも防げない。
+# その場合の手動復旧は次の cleanup 関数と同じ内容
+# （git checkout -f <元ブランチ> && git branch -D tmp/gates-test-l4 &&
+#   rm -rf apps/api/reports/mutation）。
+_l4_selftest() {
+  local base
+  base=$(git rev-parse --abbrev-ref HEAD)
+  if [ "$base" = "HEAD" ]; then
+    printf 'stryker-diff の実起動チェック: detached HEAD では実行できません\n' >&2
+    return 2
+  fi
+  if git show-ref --quiet refs/heads/tmp/gates-test-l4; then
+    printf 'stryker-diff の実起動チェック: ブランチ tmp/gates-test-l4 が残っています。前回が異常終了しています\n' >&2
+    printf '  復旧: git branch -D tmp/gates-test-l4\n' >&2
+    return 2
+  fi
+
+  _l4_cleanup() {
+    git checkout --quiet "$base" 2>/dev/null || true
+    git branch -D tmp/gates-test-l4 >/dev/null 2>&1 || true
+    rm -rf apps/api/reports/mutation
+  }
+  trap _l4_cleanup EXIT
+
+  if ! git checkout --quiet -b tmp/gates-test-l4; then
+    printf 'stryker-diff の実起動チェック: 一時ブランチを作成できませんでした\n' >&2
+    _l4_cleanup
+    trap - EXIT
+    return 2
+  fi
+
+  printf '\n// gates.test.sh が Stryker の実起動を確認するための一時的な差分\n' >> apps/api/src/discount/discount.ts
+  # -a ではなく対象ファイルを明示する。-a は追跡中の全変更をステージするため、
+  # gates.test.sh 自身の未コミット編集など無関係な変更まで一時ブランチのコミットに
+  # 混入し、後段の branch -D で失われる（実測で発生）。
+  git commit --quiet -m "tmp: gates.test.sh の L4 実起動確認" -- apps/api/src/discount/discount.ts
+
+  GATE_BASE_REF="$base" ./scripts/stryker-diff.sh >/tmp/gates-test-l4.log 2>&1
+  check 'stryker-diff は差分があるとき Stryker を起動して pass' 0 "$?"
+  grep -qE 'L4_MUTATE_FILES=src/discount/discount\.ts' /tmp/gates-test-l4.log
+  check 'stryker-diff はミューテート対象を出力する' 0 "$?"
+  grep -qE 'Mutation score|mutant\(s\)' /tmp/gates-test-l4.log
+  check 'stryker-diff は実際に mutant を実行する' 0 "$?"
+
+  _l4_cleanup
+  trap - EXIT
+
+  if [ "$(git rev-parse --abbrev-ref HEAD)" != "$base" ] || git show-ref --quiet refs/heads/tmp/gates-test-l4; then
+    printf 'stryker-diff の実起動チェック: %s への復帰に失敗しました。手動で復旧してください\n' "$base" >&2
+    printf '  復旧: git checkout -f %s && git branch -D tmp/gates-test-l4\n' "$base" >&2
+    return 1
+  fi
+  return 0
+}
+
+_l4_selftest
+check 'stryker-diff の実起動チェックが安全に完走する（前提確認と後始末を含む）' 0 "$?"
+
 if [ "$FAILURES" -eq 0 ]; then
   printf '\n全 %s 件のチェックが成功しました\n' "$TOTAL"
   exit 0

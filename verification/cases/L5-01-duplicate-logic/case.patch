@@ -1,0 +1,17 @@
+diff --git a/apps/web/src/features/orders/orderTotal.ts b/apps/web/src/features/orders/orderTotal.ts
+index 957a902..66fd8f7 100644
+--- a/apps/web/src/features/orders/orderTotal.ts
++++ b/apps/web/src/features/orders/orderTotal.ts
+@@ -1,3 +1,4 @@
++import { MEMBER_DISCOUNT_MIN_PRICE } from '@repo/shared';
+ import type { OrderView } from '../../api/client';
+ 
+ /** 全注文の割引後合計 */
+@@ -7,5 +8,6 @@ export function sumDiscountedTotal(orders: readonly OrderView[]): number {
+ 
+ /** この注文に割引が効いているか */
+ export function isDiscountApplied(order: OrderView): boolean {
+-  return order.discountedTotal < order.unitPrice * order.quantity;
++  // API の discountedTotal を見ずに、割引条件を web 側で再判定する
++  return order.unitPrice * order.quantity >= MEMBER_DISCOUNT_MIN_PRICE;
+ }
