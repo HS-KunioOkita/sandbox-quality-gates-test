@@ -87,6 +87,30 @@ check 'l5-ai-review は比較対象が無いとき error' 2 "$?"
 env -i PATH=/usr/bin:/bin HOME="$HOME" bash ./scripts/gates/l5-ai-review.sh >/dev/null 2>&1
 check 'l5-ai-review は claude が無いとき error' 2 "$?"
 
+# --- L4 が実際に Stryker を起動できることを確認する（申し送り #41） ---
+# run-all.sh の baseline も既存のテストも、apps/api/src に差分が無い状態でしか
+# stryker-diff.sh を呼んでいない。どちらも L4_MUTATE_FILES=(none) のスキップ経路で
+# 緑になるため、**このリポジトリの自動チェックのどれ一つも「Stryker が実際に
+# 起動できる」ことを確認していなかった**。ここで初めてその経路を通す。
+#
+# 一時ブランチを切って無害な差分を 1 つ作り、元ブランチを GATE_BASE_REF に渡す。
+_l4_base=$(git rev-parse --abbrev-ref HEAD)
+git checkout --quiet -b tmp/gates-test-l4
+printf '\n// gates.test.sh が Stryker の実起動を確認するための一時的な差分\n' >> apps/api/src/discount/discount.ts
+# -a ではなく対象ファイルを明示する。-a は追跡中の全変更をステージするため、
+# gates.test.sh 自身の未コミット編集など無関係な変更まで一時ブランチのコミットに
+# 混入し、後段の branch -D で失われる（実測で発生）。
+git commit --quiet -m "tmp: gates.test.sh の L4 実起動確認" -- apps/api/src/discount/discount.ts
+GATE_BASE_REF="$_l4_base" ./scripts/stryker-diff.sh >/tmp/gates-test-l4.log 2>&1
+check 'stryker-diff は差分があるとき Stryker を起動して pass' 0 "$?"
+grep -qE 'L4_MUTATE_FILES=src/discount/discount.ts' /tmp/gates-test-l4.log
+check 'stryker-diff はミューテート対象を出力する' 0 "$?"
+grep -qE 'Mutation score|mutant\(s\)' /tmp/gates-test-l4.log
+check 'stryker-diff は実際に mutant を実行する' 0 "$?"
+git checkout --quiet "$_l4_base"
+git branch -D tmp/gates-test-l4 >/dev/null 2>&1
+rm -rf apps/api/reports/mutation
+
 if [ "$FAILURES" -eq 0 ]; then
   printf '\n全 %s 件のチェックが成功しました\n' "$TOTAL"
   exit 0
