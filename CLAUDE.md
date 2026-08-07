@@ -87,7 +87,7 @@
 
 Phase 0（モノレポ基盤とサンプルアプリ）、Phase 1（L1 ゲート + 検証ハーネス + L1 系 6 ケース）、Phase 2（L2 ゲート 4 本 + L2 系 5 ケース）、Phase 3（L3 ゲート 2 本 + L3 系 3 ケース）、Phase 4（L4 ゲート 1 本 + L4 系 2 ケース）、Phase 5（L5 ゲート 1 本 + L5 系 3 ケース + nightly 実測 + cloudbuild）が完了。次は Phase 6（検証レポート作成）。
 
-ブロックするゲートは 9 本（`scripts/gates/gates.list.sh` の `GATE_ORDER`）+ 非ブロック 1 本 + **`GATE_ORDER` 外 2 本**。Playwright（`l3-e2e-web.sh`）は**意図的に `GATE_ORDER` の外**に置いてある（`phase0-findings.md` §1.35）。`l5-ai-review.sh`（AI レビュー）も**意図的に `GATE_ORDER` にも `GATE_DETECTION` にも入れていない**（`claude -p` は非決定的で、1 回の結果を `RESULTS.md` に固定すると誤読を生むため。Phase 5 決定。§1.61 以降）。`apps/web` の Stryker も**意図的に `GATE_ORDER` の外**（nightly 用。§1.48）。
+ブロックするゲートは 9 本（`scripts/gates/gates.list.sh` の `GATE_ORDER`）+ 非ブロック 1 本 + **`GATE_ORDER` 外 2 本**。ここで「ゲート」と数えるのは `scripts/gates/` に対応するスクリプトがあるものだけで、以下の 2 本を指す。Playwright（`l3-e2e-web.sh`）は**意図的に `GATE_ORDER` の外**に置いてある（`phase0-findings.md` §1.35）。`l5-ai-review.sh`（AI レビュー）も**意図的に `GATE_ORDER` にも `GATE_DETECTION` にも入れていない**（`claude -p` は非決定的で、1 回の結果を `RESULTS.md` に固定すると誤読を生むため。Phase 5 決定。§1.61 以降）。**なお `apps/web` の Stryker（nightly 用。§1.48）は `scripts/gates/` にスクリプトを持たない生の pnpm コマンドであり、上の「ゲート」の数には含めていない。**
 
 全 19 ケースの結果は `verification/RESULTS.md`（**✅ 10 行 / ❌ 9 行 / ⚠️ 0 行**）。既存 16 ケースは Phase 4 から退行なし（✅ 10 / ❌ 6）で、増えた ❌ 3 行は L5 系 3 ケースである。L1 系は Phase 1 から退行なし（5 件 ✅ / L1-06 のみ ❌）。`run-all.sh` の所要は 5 回の実測で **6 分 9 秒 / 6 分 1 秒（いずれも 14 ケース分・対照実行を含まない）/ 14 分 35 秒（14 ケース + 対照実行）/ 8 分 7 秒（16 ケース + 対照実行 33 秒、ゲート 9 本）/ 8 分 29 秒（19 ケース + 対照実行 22 秒、ゲート 9 本 + 非ブロック 1 本 + `GATE_ORDER` 外 2 本）**。**壁時計を根拠に判断しないこと**（§1.38）。ゲートとケースが増え続けているのに壁時計の値が単調に伸びていないという構造は Phase 3〜5 を通じて繰り返し観測されており、原因はマシン負荷であって高速化の証拠ではない。
 
