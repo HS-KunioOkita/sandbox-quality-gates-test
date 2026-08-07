@@ -1,0 +1,216 @@
+# cloudbuild.pr.yaml
+#
+# 手順書 §7（`docs/多層品質ゲート_L1-L5_導入手順_NestJS-React.md` 620〜734 行目）を
+# 下敷きにした PR パイプライン。**未実行**（このリポジトリに `gcloud` は入っていない。
+# CLAUDE.md の環境節）。実行して確認したわけではないので、書けるのは
+# 「手順書のどの記述をどう変えたか」と「その理由」だけである。
+#
+# ステップの並び: GATE_ORDER の 9 本（scripts/gates/gates.list.sh）
+#   l2-install → l1-typecheck / l1-lint → l2-semgrep / l2-osv / l2-gitleaks
+#   → l3-test → l3-openapi-drift → l4-mutation
+# + GATE_DETECTION の 1 本（l2-new-deps）+ L5（l5-ai-review）。
+#
+# ============================================================
+# 手順書 §7 からの逸脱（brief 記載の 4 点。文言はそのまま使う）
+# ============================================================
+#
+# 手順書 §7 からの逸脱 (1): corepack enable を書かない。
+#   このリポジトリに corepack が入っていない（申し送り #37(a)）。pnpm は
+#   グローバルインストール済みという前提を CI 側にも要求する形になる。
+#   手順書をそのまま使う読者は corepack がある前提なので、ここは環境差である。
+#   代替として各ステップで `npm install -g pnpm@11.1.1` を実行する
+#   （package.json の packageManager フィールドと同じバージョンに固定）。
+#
+# 手順書 §7 からの逸脱 (2): 各ステップに GATE_BASE_REF を明示的に渡す。
+#   stryker-diff.sh と l2-new-deps.sh から git fetch を外したため、比較対象を
+#   環境変数で受け取る規約にした（申し送り #37(b)）。渡さないと既定の
+#   origin/main を見に行き、shallow clone では解決できず error(2) になる。
+#
+# 手順書 §7 からの逸脱 (3): l3-test に --filter='...[origin/main]' を使わない。
+#   対象 0 件でも exit 0 になり「何が走ったか分からない緑」を作る（§1.43）。
+#
+# 手順書 §7 からの逸脱 (4): 各ステップがゲートスクリプトを呼ぶ。
+#   手順書はコマンドを直書きするが、そうするとローカルで検証したゲートと
+#   CI で動くものが別物になる。exit code の 3 値正規化（0/1/2）もゲート
+#   スクリプト側にあるので、直書きすると error を fail と誤記録する経路が
+#   CI にだけ復活する（設計書 §6.1）。
+#
+# ============================================================
+# 自分で判断して足した逸脱（brief には無い。理由を書く）
+# ============================================================
+#
+# 逸脱 (5): 手順書 §7 のサンプル YAML には l2-gitleaks のステップが無い。
+#   手順書 §3.3 ③ で gitleaks に触れているにもかかわらず、§7 の統合 YAML には
+#   ステップが欠落している（手順書自体の抜け）。このリポジトリの GATE_ORDER は
+#   l2-gitleaks を含む 9 本なので、ここでは追加する。
+#
+# 逸脱 (6): 全ステップで node:22 イメージを使う。
+#   手順書は L2 のツールごとに専用の軽量イメージ（semgrep/semgrep,
+#   ghcr.io/google/osv-scanner, gcr.io/cloud-builders/git）を name: に直接
+#   指定し、そのイメージ自身をゲートとして実行する。しかしこのリポジトリの
+#   ゲートスクリプトは bash 前提（`set -uo pipefail` 等）で、かつ「Docker Desktop
+#   経由でツールを動かす」規約（scripts/gates/_lib.sh の GATE_IMG_*、
+#   `docker run` で対象イメージを起動する）になっている。専用軽量イメージには
+#   bash も docker CLI も無いため、逸脱 (4) の「ゲートスクリプトを呼ぶ」を
+#   維持するには bash を持つイメージが必要になる。node:22 で統一し、
+#   Docker 経由のゲート（l2-semgrep / l2-osv / l2-gitleaks / l3-test）では
+#   docker CLI を明示的にインストールする（Cloud Build はビルド VM の
+#   Docker デーモンをステップに公開するとドキュメントされているが、
+#   **この動作は未実測・未検証である**。node:22 イメージ自体に docker CLI が
+#   無いことは Docker Hub の公開情報から明らかだが、GCB のソケット共有が
+#   このリポジトリのゲートスクリプトと噛み合うかは実行して確かめていない）。
+#
+# 逸脱 (7): l2-new-deps の呼び出しに || true を付ける。
+#   scripts/gates/l2-new-deps.sh は非ブロックゲート（GATE_DETECTION）だが、
+#   GATE_BASE_REF が解決できない場合は exit 2 を返す。手順書 §3.3 の原文
+#   （シェルコマンド直書き、常に exit 0）にはこの経路が無い。CI を止めない
+#   という非ブロックゲートの趣旨を守るため || true を付ける。
+#
+# ============================================================
+# L5（AI レビュー）についての申し送り
+# ============================================================
+#
+# l5-ai-review は GATE_ORDER にも GATE_DETECTION にも入れていない。
+# claude -p は非決定的で、1 回の結果を RESULTS.md に恒久的な事実として
+# 固定すると誤読を生むため（Phase 5 の決定 D1）。ただし手順書 §7 の
+# CI 上の位置づけ（非ブロック、|| true）は手順書と同じである。
+#
+# .claude/skills/code-review/SKILL.md は手順の 1 番目に
+# `git diff origin/main...HEAD` をハードコードしている（Task 1・2 の実測）。
+# ゲート（scripts/gates/l5-ai-review.sh）は GATE_BASE_REF で比較対象を渡すが、
+# スキル本文と食い違ったときにモデルがどちらに従うかは 15 回の実測では
+# 引数側だった（0/15 で origin/main を見た回なし）。ただし claude -p は
+# 非決定的なので、これは恒久的な保証ではない。CI で使うなら毎回レビュー
+# 対象の範囲を確認する必要がある。
+
+timeout: '1800s'
+options:
+  machineType: 'E2_HIGHCPU_8'
+  env:
+    - 'CI=true'
+    - 'FC_NUM_RUNS=100'
+
+availableSecrets:
+  secretManager:
+    - versionName: projects/$PROJECT_ID/secrets/anthropic-api-key/versions/latest
+      env: 'ANTHROPIC_API_KEY'
+
+steps:
+  # ---------- 準備 ----------
+  - id: l2-install
+    name: node:22
+    entrypoint: bash
+    env: ['GATE_BASE_REF=origin/$_BASE_BRANCH']
+    args:
+      - -c
+      - |
+        # 逸脱 (1): corepack enable の代わりに pnpm をグローバルインストールする。
+        npm install -g pnpm@11.1.1
+        # origin/$_BASE_BRANCH を後続ステップの GATE_BASE_REF で解決できるようにする
+        # ため fetch は残す（手順書 §7 のこの行自体は変えていない）。
+        git fetch --no-tags --depth=50 origin "$_BASE_BRANCH"
+        ./scripts/gates/l2-install.sh
+
+  # ---------- L1 静的解析（並列）----------
+  - id: l1-typecheck
+    name: node:22
+    entrypoint: bash
+    args: ['-c', 'npm install -g pnpm@11.1.1 && ./scripts/gates/l1-typecheck.sh']
+    waitFor: ['l2-install']
+
+  - id: l1-lint
+    name: node:22
+    entrypoint: bash
+    args: ['-c', 'npm install -g pnpm@11.1.1 && ./scripts/gates/l1-lint.sh']
+    waitFor: ['l2-install']
+
+  # ---------- L2 SAST・依存・秘密（並列）----------
+  - id: l2-semgrep
+    name: node:22
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        # 逸脱 (6): l2-semgrep.sh は docker run で semgrep イメージを起動する
+        # 規約のため、node:22 に docker CLI を入れる。
+        apt-get update -qq && apt-get install -y -qq docker.io >/dev/null
+        ./scripts/gates/l2-semgrep.sh
+    waitFor: ['l2-install']
+
+  - id: l2-osv
+    name: node:22
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        apt-get update -qq && apt-get install -y -qq docker.io >/dev/null
+        ./scripts/gates/l2-osv.sh
+    waitFor: ['l2-install']
+
+  - id: l2-gitleaks
+    name: node:22
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        # 逸脱 (5): 手順書 §7 のサンプルには無いステップ。GATE_ORDER に含まれるため追加する。
+        apt-get update -qq && apt-get install -y -qq docker.io >/dev/null
+        ./scripts/gates/l2-gitleaks.sh
+    waitFor: ['l2-install']
+
+  - id: l2-new-deps
+    name: node:22
+    entrypoint: bash
+    env: ['GATE_BASE_REF=origin/$_BASE_BRANCH']
+    args:
+      # 逸脱 (7): 非ブロックゲート。GATE_BASE_REF が解決できない場合の exit 2 が
+      # CI を止めないよう || true を付ける。
+      - -c
+      - './scripts/gates/l2-new-deps.sh || true'
+    waitFor: ['l2-install']
+
+  # ---------- L3 テスト ----------
+  - id: l3-test
+    name: node:22
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        # 逸脱 (3): --filter='...[origin/main]' を使わない（対象 0 件でも exit 0 になる。§1.43）。
+        # 逸脱 (6): Testcontainers が Docker を要求するため docker CLI を入れる。
+        npm install -g pnpm@11.1.1
+        apt-get update -qq && apt-get install -y -qq docker.io >/dev/null
+        ./scripts/gates/l3-test.sh
+    waitFor: ['l1-typecheck']
+
+  - id: l3-openapi-drift
+    name: node:22
+    entrypoint: bash
+    args: ['-c', 'npm install -g pnpm@11.1.1 && ./scripts/gates/l3-openapi-drift.sh']
+    waitFor: ['l1-typecheck']
+
+  # ---------- L4 ミューテーション（差分のみ）----------
+  - id: l4-mutation
+    name: node:22
+    entrypoint: bash
+    env: ['GATE_BASE_REF=origin/$_BASE_BRANCH']
+    args: ['-c', 'npm install -g pnpm@11.1.1 && ./scripts/gates/l4-mutation.sh']
+    # l3-test が緑でなければ、テストが固定していない実装をミューテーションしても
+    # 意味が無い。手順書 §7 の waitFor もここは l3-test 待ちで、変えていない。
+    waitFor: ['l3-test']
+
+  # ---------- L5 AIレビュー（非ブロック。GATE_ORDER の外。上の申し送り参照）----------
+  - id: l5-ai-review
+    name: node:22
+    entrypoint: bash
+    secretEnv: ['ANTHROPIC_API_KEY']
+    env: ['GATE_BASE_REF=origin/$_BASE_BRANCH']
+    args:
+      - -c
+      - |
+        npm i -g @anthropic-ai/claude-code
+        ./scripts/gates/l5-ai-review.sh || true
+    waitFor: ['l2-install']
+
+substitutions:
+  _BASE_BRANCH: 'main'

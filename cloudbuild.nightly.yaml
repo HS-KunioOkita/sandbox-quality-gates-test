@@ -1,0 +1,101 @@
+# cloudbuild.nightly.yaml
+#
+# 手順書 §7 の nightly（フル実行、736〜761 行目）を下敷きにする。手順書自身が
+# この節を「要点のみ」と明記しており、インストール手順を省略している。
+# ここでは単独で実行可能な完成した YAML にするため、l2-install に相当する
+# 準備ステップを補う（手順書からの追加。実行して確かめたわけではない）。
+#
+# **未実行**（`gcloud` が無い）。書けるのは「手順書のどの記述をどう変えたか」と
+# 「その理由」だけである。
+#
+# mutation-full / pbt-deep / e2e-full は互いに依存しないため、l2-install の後は
+# 並列に実行する（手順書の nightly 節にも waitFor の記載はない）。
+#
+# pbt-deep と e2e-full は、cloudbuild.pr.yaml と同じ理由（設計方針:
+# 「ローカルで検証したゲートと CI で動くものを同一にする」）で、対応する
+# ゲートスクリプトをそのまま呼ぶ。
+#   - pbt-deep  → scripts/gates/l3-test.sh を FC_NUM_RUNS=10000 で呼ぶ
+#     （手順書の `pnpm turbo test` と等価。l3-test.sh は GATE_BASE_REF も
+#     --filter も使わないので、PR 側の逸脱 (2)(3) はここには関係しない）。
+#   - e2e-full  → scripts/gates/l3-e2e-web.sh を呼ぶ。このスクリプトの
+#     ヘッダコメント自身が「実行手段だけをここに用意しておく」と書いており、
+#     nightly から呼ばれることを想定して作られている。
+#   - mutation-full は差分限定ではないフル実行で、対応するゲートスクリプトが
+#     存在しない（scripts/gates/l4-mutation.sh は差分限定の stryker-diff.sh
+#     しか呼ばない）。新規スクリプトの追加は本タスクの範囲外なので、手順書の
+#     コマンドをそのまま使う（corepack enable の除去のみ適用）。
+
+options:
+  machineType: 'E2_HIGHCPU_8'
+  env:
+    - 'CI=true'
+
+steps:
+  # ---------- 準備 ----------
+  # 手順書の nightly 節には無いステップ。「要点のみ」と明記されているため、
+  # 単独で動く完成形にするために補った（未実行）。
+  - id: l2-install
+    name: node:22
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        # 手順書 §7 からの逸脱 (1): corepack enable を書かない（このリポジトリに
+        # corepack が入っていない。申し送り #37(a)）。pnpm をグローバルインストールする。
+        npm install -g pnpm@11.1.1
+        ./scripts/gates/l2-install.sh
+
+  - id: mutation-full
+    name: node:22
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        npm install -g pnpm@11.1.1
+        pnpm --filter api exec stryker run --force
+        pnpm --filter web exec stryker run --force
+        # (1) ミューテーションレポートを成果物として公開しない。
+        #   Stryker の json / html レポーターはミューテート対象のソース全文
+        #   （コメント・リテラル含む）を埋め込む（§1.55）。artifacts に載せると
+        #   ソースコード全体が公開範囲に入り、秘密が含まれていれば二次的に拡散する。
+        #   公開するなら保存期間・公開範囲・アクセス制御を先に決めること（申し送り #36）。
+        #
+        # (2) baseline スコアとの比較機構は作っていない。
+        #   incremental を切ったので、手順書 §5.4 の「incremental の誤差をリセット
+        #   するために nightly でフル実行する」という動機はこのリポジトリでは成立
+        #   しない。それでもフル実行には価値がある——差分限定では原理的に見えない
+        #   L4-01 型の低下が見える（§1.56）。ただしその価値は「閾値で止める」ことでは
+        #   なく「baseline からの低下を見る」ことなので、比較対象のスコアをどこに
+        #   保存するかを決める必要がある。Phase 5 では決めていない（申し送り #38）。
+    waitFor: ['l2-install']
+
+  - id: pbt-deep
+    name: node:22
+    entrypoint: bash
+    env: ['FC_NUM_RUNS=10000']
+    args:
+      - -c
+      - |
+        npm install -g pnpm@11.1.1
+        apt-get update -qq && apt-get install -y -qq docker.io >/dev/null
+        ./scripts/gates/l3-test.sh
+        # (3) FC_NUM_RUNS=10000 の対比は実測済みで、期待された差が出ていない。
+        #   100 回 0.344 秒 / 10000 回 0.350 秒（§1.31）。手順書 §4.5 が暗黙に
+        #   想定している「nightly は深いぶん遅い」という対比は、検証対象の関数が
+        #   軽量な純関数である限り成立しない。ステップ自体は手順書どおり残す。
+    waitFor: ['l2-install']
+
+  - id: e2e-full
+    name: mcr.microsoft.com/playwright:v1.50.0-jammy
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        # l3-e2e-web.sh は GATE_ORDER の外（PR では実行しない。判断根拠は
+        # scripts/gates/l3-e2e-web.sh のヘッダコメントおよび cloudbuild.pr.yaml
+        # の自己レビュー参照）。ヘッダコメント自身が nightly からの呼び出しを
+        # 想定しているため、そのままここで呼ぶ。
+        npm install -g pnpm@11.1.1
+        apt-get update -qq && apt-get install -y -qq docker.io >/dev/null
+        ./scripts/gates/l3-e2e-web.sh
+    waitFor: ['l2-install']
