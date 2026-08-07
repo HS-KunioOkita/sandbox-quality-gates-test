@@ -77,6 +77,12 @@ steps:
       - -c
       - |
         npm install -g pnpm@11.1.1
+        # 未実測・未検証: node:22 に docker CLI を追加インストールし、それが Cloud
+        # Build のビルド VM の Docker デーモンに繋がる前提で l3-test.sh
+        # （内部で gate_require_docker → Testcontainers が docker を要求する）を
+        # 呼んでいる。この前提自体は gcloud が無いため実行して確認していない
+        # （cloudbuild.pr.yaml の逸脱 (6) と同じ未検証のリスクで、pbt-deep と
+        # e2e-full の両方がこの経路を使う）。
         apt-get update -qq && apt-get install -y -qq docker.io >/dev/null
         ./scripts/gates/l3-test.sh
         # (3) FC_NUM_RUNS=10000 の対比は実測済みで、期待された差が出ていない。
@@ -95,6 +101,12 @@ steps:
         # scripts/gates/l3-e2e-web.sh のヘッダコメントおよび cloudbuild.pr.yaml
         # の自己レビュー参照）。ヘッダコメント自身が nightly からの呼び出しを
         # 想定しているため、そのままここで呼ぶ。
+        #
+        # 未実測・未検証: このステップも pbt-deep と同じ経路（node:22 に docker
+        # CLI を追加インストールし、Cloud Build のビルド VM の Docker デーモンに
+        # 繋がる前提）を使う。l3-e2e-web.sh も内部で gate_require_docker を呼ぶ
+        # （Testcontainers 経由の PostgreSQL 起動）。この前提は gcloud が無いため
+        # 実行して確認していない（cloudbuild.pr.yaml の逸脱 (6) と同じリスク）。
         npm install -g pnpm@11.1.1
         apt-get update -qq && apt-get install -y -qq docker.io >/dev/null
         ./scripts/gates/l3-e2e-web.sh
