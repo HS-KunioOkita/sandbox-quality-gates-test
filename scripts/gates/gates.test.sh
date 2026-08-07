@@ -81,11 +81,32 @@ done
 # --- L5（非ブロック・GATE_ORDER 外）の error 経路 ---
 # l5-ai-review は exit code で欠陥を主張しない（常に 0）。したがって
 # 「動かなかったのに緑」を防げるのは error(2) のガードだけである。そこを直接突く。
-GATE_BASE_REF=refs/heads/does-not-exist ./scripts/gates/l5-ai-review.sh >/dev/null 2>&1
-check 'l5-ai-review は比較対象が無いとき error' 2 "$?"
+#
+# l5-ai-review.sh は gate_require_cmd claude（ref 検査より前）を呼ぶ。§1.13 の表 #9
+# （Docker ガードの検証が PATH 剥がしで docker バイナリ不在の分岐に化けていた件）と
+# 完全に同型の罠がここにもある: claude が入っていないマシンでは、下の 1 件目の check も
+# gate_require_cmd 由来の exit 2 を見て pass してしまい、ref ガードを丸ごと削除しても
+# 緑のままになる。exit code だけでは 2 つの分岐を区別できないので、メッセージで到達点を
+# 確かめる（scripts/gates/gates.test.sh の Docker デーモン検証と同じ手法）。
+out=$( GATE_BASE_REF=refs/heads/does-not-exist ./scripts/gates/l5-ai-review.sh 2>&1 )
+code=$?
+check 'l5-ai-review は比較対象が無いとき error' 2 "$code"
+case "$out" in
+  *'比較対象の ref が見つかりません'*)
+    check 'l5-ai-review は ref 検査の分岐に到達する' 'ref-msg' 'ref-msg' ;;
+  *)
+    check 'l5-ai-review は ref 検査の分岐に到達する' 'ref-msg' 'other-msg' ;;
+esac
 
-env -i PATH=/usr/bin:/bin HOME="$HOME" bash ./scripts/gates/l5-ai-review.sh >/dev/null 2>&1
-check 'l5-ai-review は claude が無いとき error' 2 "$?"
+out=$( env -i PATH=/usr/bin:/bin HOME="$HOME" bash ./scripts/gates/l5-ai-review.sh 2>&1 )
+code=$?
+check 'l5-ai-review は claude が無いとき error' 2 "$code"
+case "$out" in
+  *'コマンドが見つかりません: claude'*)
+    check 'l5-ai-review は claude 不在の分岐に到達する' 'claude-msg' 'claude-msg' ;;
+  *)
+    check 'l5-ai-review は claude 不在の分岐に到達する' 'claude-msg' 'other-msg' ;;
+esac
 
 # --- L4 が実際に Stryker を起動できることを確認する（申し送り #41） ---
 # run-all.sh の baseline も既存のテストも、apps/api/src に差分が無い状態でしか

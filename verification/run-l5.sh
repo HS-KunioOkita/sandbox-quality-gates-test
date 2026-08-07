@@ -328,12 +328,36 @@ for case_id in $CASES; do
     git status --short >&2
     exit 2
   fi
+
+  # 作業ツリーの汚れも検査する。claude -p はツール制限なし（--allowedTools も
+  # --permission-mode も無し）で呼ばれており、実際に書き込みを試みている
+  # （verification/l5-runs/L5-03-missing-boundary-test/run-4.md:1 と run-2.md:1 が
+  # 「リポジトリ内ファイルの書き換え/検証用スクリプトの実行が承認されず未実行」と
+  # 明記している——つまり書き込みは試みられ、今回は権限プロンプトで止まっただけである）。
+  # 両ブランチで内容が同一のファイルを書き換えた場合、上の HEAD / ブランチ消滅の検査は
+  # パスしたまま、git checkout はその変更を作業ツリーに持ち越して成功する
+  # （run-case.sh:85-103 が別経路で詳述する構造と同型）。見逃すと、AI が加えた編集が
+  # ユーザーの実ブランチに黙って残る。
+  if [ -n "$(git status --porcelain)" ]; then
+    printf 'エラー: %s への復帰後に作業ツリーが汚れています。claude -p の書き込みが持ち越された可能性があります\n' "$BASE_BRANCH" >&2
+    printf '  復旧: git status で内容を確認し、意図しない変更を戻してください（git checkout -- <file> / git clean -fd）\n' >&2
+    git status --short >&2
+    exit 2
+  fi
   trap - EXIT
 done
 
 # 全ケースが終わってから、$WORK の生出力を verification/l5-runs/<CASE-ID>/run-N.md へ
 # コピーする。出力ファイルが無い回（claude コマンド自体が起動できなかった等）は
 # 空ファイルを置き、status.tsv 側の記録で「実行不能」と判定できるようにする。
+#
+# 生出力を追跡ファイルとして残す（.gitignore しない）のは、判定基準を後から検証
+# 可能にするため（設計の決定 D6）。この判断が成立するのは L5 系 3 ケースの差分に
+# 秘密が含まれないからである。**秘密を含むケース（L2-03-hardcoded-secret 型）を
+# 上の CASES に追加してはならない。** 追加すると、その秘密を埋め込んだ AI の
+# 生出力が git 履歴に永久にコミットされる（l5-ai-review.sh のヘッダが reports/
+# 配下を追跡しない理由として述べる §1.55 と同型のリスクが、ここでは追跡ディレクトリ
+# 側で顕在化する）。
 mkdir -p "$OUT_DIR"
 for case_id in $CASES; do
   mkdir -p "$OUT_DIR/$case_id"

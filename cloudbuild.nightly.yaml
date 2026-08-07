@@ -92,7 +92,7 @@ steps:
     waitFor: ['l2-install']
 
   - id: e2e-full
-    name: mcr.microsoft.com/playwright:v1.50.0-jammy
+    name: mcr.microsoft.com/playwright:v1.62.0-jammy
     entrypoint: bash
     args:
       - -c
@@ -102,9 +102,9 @@ steps:
         # の自己レビュー参照）。ヘッダコメント自身が nightly からの呼び出しを
         # 想定しているため、そのままここで呼ぶ。
         #
-        # 未実測・未検証: このステップも pbt-deep と同じ経路（node:22 に docker
+        # 未実測・未検証: このステップは playwright イメージ（上の name）に docker
         # CLI を追加インストールし、Cloud Build のビルド VM の Docker デーモンに
-        # 繋がる前提）を使う。l3-e2e-web.sh も内部で gate_require_docker を呼ぶ
+        # 繋がる前提を使う。l3-e2e-web.sh も内部で gate_require_docker を呼ぶ
         # （Testcontainers 経由の PostgreSQL 起動）。この前提は gcloud が無いため
         # 実行して確認していない（cloudbuild.pr.yaml の逸脱 (6) と同じリスク）。
         npm install -g pnpm@11.1.1

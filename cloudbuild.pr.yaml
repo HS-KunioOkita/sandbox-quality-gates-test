@@ -200,6 +200,13 @@ steps:
     waitFor: ['l3-test']
 
   # ---------- L5 AIレビュー（非ブロック。GATE_ORDER の外。上の申し送り参照）----------
+  # 逸脱: 手順書 §6.3 は `> review.md || true` の後に `cat review.md` を続け、レビュー結果を
+  # ビルドログに出す。このステップは l5-ai-review.sh を呼ぶだけで cat していないため、
+  # ビルドログには `L5_REVIEW_OUT=` の 1 行しか出ず、レビュー結果を誰も見られない
+  # （reports/l5/review.md は .gitignore 済みでコンテナ揮発）。あえて cat を足していない:
+  # 出力は差分の内容——秘密を含みうる（l5-ai-review.sh のヘッダ、§1.55 と同型のリスク）——を
+  # 埋め込むため、長期保存・広い閲覧範囲を持つビルドログにそのまま出すかどうかは、保存期間・
+  # アクセス制御を決めてから判断すべき論点であり、この Phase では決めていない。
   - id: l5-ai-review
     name: node:22
     entrypoint: bash
